@@ -22,6 +22,12 @@ public sealed class Device
 
     public string? Reachability { get; set; }
 
+    public string? Segment { get; set; }
+
+    public string? Gateway { get; set; }
+
+    public string? RouteSummary { get; set; }
+
     public DateTime FirstSeen { get; init; }
 
     public DateTime LastSeen { get; set; }
