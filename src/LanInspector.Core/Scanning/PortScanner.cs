@@ -31,14 +31,25 @@ public sealed class PortScanner
         TimeSpan timeout,
         CancellationToken cancellationToken = default)
     {
-        var tasks = CommonServices.Keys.Select(port => ScanPortAsync(ipAddress, port, timeout, cancellationToken));
+        var tasks = CommonServices.Keys.Select(port => ScanPortAsync(ipAddress, port, CommonServices[port], timeout, cancellationToken));
         var results = await Task.WhenAll(tasks);
         return results.Where(result => result.IsOpen).OrderBy(result => result.Port).ToArray();
+    }
+
+    public Task<PortScanResult> ScanPortAsync(
+        IPAddress ipAddress,
+        int port,
+        TimeSpan timeout,
+        CancellationToken cancellationToken = default)
+    {
+        var serviceName = CommonServices.TryGetValue(port, out var service) ? service : $"TCP {port}";
+        return ScanPortAsync(ipAddress, port, serviceName, timeout, cancellationToken);
     }
 
     private static async Task<PortScanResult> ScanPortAsync(
         IPAddress ipAddress,
         int port,
+        string serviceName,
         TimeSpan timeout,
         CancellationToken cancellationToken)
     {
@@ -49,15 +60,15 @@ public sealed class PortScanner
             timeoutCts.CancelAfter(timeout);
 
             await client.ConnectAsync(ipAddress, port, timeoutCts.Token);
-            return new PortScanResult(port, client.Connected, CommonServices[port]);
+            return new PortScanResult(port, client.Connected, serviceName);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            return new PortScanResult(port, false, CommonServices[port]);
+            return new PortScanResult(port, false, serviceName);
         }
         catch
         {
-            return new PortScanResult(port, false, CommonServices[port]);
+            return new PortScanResult(port, false, serviceName);
         }
     }
 }

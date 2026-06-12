@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using LanInspector.Core.Diagnostics;
 using LanInspector.Core.Model;
 
 namespace LanInspector.UI.ViewModels;
@@ -38,10 +39,27 @@ public sealed partial class DeviceRowViewModel : ObservableObject
     private string _seenVia = string.Empty;
 
     [ObservableProperty]
+    private string _segment = string.Empty;
+
+    [ObservableProperty]
+    private string _reachability = string.Empty;
+
+    [ObservableProperty]
+    private string _gateway = string.Empty;
+
+    [ObservableProperty]
+    private string _routeSummary = string.Empty;
+
+    [ObservableProperty]
+    private string _sshCommand = string.Empty;
+
+    [ObservableProperty]
     private string _firstSeenLocal = string.Empty;
 
     [ObservableProperty]
     private string _lastSeenLocal = string.Empty;
+
+    public bool HasSsh => !string.IsNullOrWhiteSpace(SshCommand);
 
     public void Update(Device device)
     {
@@ -49,6 +67,7 @@ public sealed partial class DeviceRowViewModel : ObservableObject
         string[] observedNames;
         string[] seenVia;
         string[] openPorts;
+        int[] openPortNumbers;
         string hostname;
         string vendor;
         string dhcpVendorClass;
@@ -60,8 +79,8 @@ public sealed partial class DeviceRowViewModel : ObservableObject
             ipAddresses = device.IpAddresses.OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToArray();
             observedNames = device.ObservedNames.OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToArray();
             seenVia = device.SeenVia.OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToArray();
-            openPorts = device.OpenPorts
-                .OrderBy(port => port)
+            openPortNumbers = device.OpenPorts.OrderBy(port => port).ToArray();
+            openPorts = openPortNumbers
                 .Select(port => device.PortServices.TryGetValue(port, out var service) ? $"{port} {service}" : port.ToString())
                 .ToArray();
             hostname = device.Hostname ?? string.Empty;
@@ -69,6 +88,10 @@ public sealed partial class DeviceRowViewModel : ObservableObject
             dhcpVendorClass = device.DhcpVendorClass ?? string.Empty;
             firstSeen = device.FirstSeen;
             lastSeen = device.LastSeen;
+            Segment = device.Segment ?? string.Empty;
+            Reachability = device.Reachability ?? string.Empty;
+            Gateway = device.Gateway ?? string.Empty;
+            RouteSummary = device.RouteSummary ?? string.Empty;
         }
 
         IpAddresses = string.Join(", ", ipAddresses);
@@ -80,7 +103,34 @@ public sealed partial class DeviceRowViewModel : ObservableObject
         DhcpVendorClass = dhcpVendorClass;
         OpenPorts = string.Join(", ", openPorts);
         SeenVia = string.Join(", ", seenVia);
+        SshCommand = BuildSshCommand(ipAddresses.FirstOrDefault(), openPortNumbers);
         FirstSeenLocal = firstSeen.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
         LastSeenLocal = lastSeen.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
+    }
+
+    public void ApplyNetworkClassification(DeviceNetworkClassification classification)
+    {
+        lock (Device)
+        {
+            Device.Segment = classification.Segment;
+            Device.Reachability = classification.Reachability.ToString();
+            Device.Gateway = classification.Gateway;
+            Device.RouteSummary = classification.RouteSummary;
+        }
+
+        Segment = classification.Segment;
+        Reachability = classification.Reachability.ToString();
+        Gateway = classification.Gateway;
+        RouteSummary = classification.RouteSummary;
+    }
+
+    private static string BuildSshCommand(string? ipAddress, IReadOnlyCollection<int> openPorts)
+    {
+        if (string.IsNullOrWhiteSpace(ipAddress) || !openPorts.Contains(22))
+        {
+            return string.Empty;
+        }
+
+        return $"ssh {ipAddress}";
     }
 }

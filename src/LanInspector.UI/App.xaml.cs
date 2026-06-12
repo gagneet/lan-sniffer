@@ -3,9 +3,13 @@ using System.IO;
 using System.Windows;
 using LanInspector.Core.Analysis;
 using LanInspector.Core.Capture;
+using LanInspector.Core.Configuration;
+using LanInspector.Core.Diagnostics;
 using LanInspector.Core.Identity;
 using LanInspector.Core.Model;
+using LanInspector.Core.Network;
 using LanInspector.Core.Scanning;
+using LanInspector.UI.Services;
 using LanInspector.UI.ViewModels;
 using LanInspector.UI.Views;
 
@@ -31,12 +35,19 @@ public partial class App : Application
         var vendorLookup = new OuiVendorLookup();
         vendorLookup.LoadCsv(Path.Combine(AppContext.BaseDirectory, "Data", "oui.csv"));
 
+        var knownDevices = KnownDevicesConfiguration.Load(Path.Combine(AppContext.BaseDirectory, "Data", "known-devices.json"));
+        var localNetworkProvider = new LocalNetworkProfileProvider();
+
         var viewModel = new MainViewModel(
             _captureProvider,
             analyzers,
+            knownDevices.KnownDevices,
             vendorLookup,
             new HostnameResolver(),
             new PortScanner(),
+            new WindowsPowerShellRouteDiagnosticsService(),
+            new ReachabilityClassifier(localNetworkProvider),
+            new WindowsTerminalLauncher(),
             devices.Clear,
             action =>
             {
