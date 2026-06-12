@@ -1,31 +1,61 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
+using System.Net;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using LanInspector.Core.Analysis;
 using LanInspector.Core.Capture;
+using LanInspector.Core.Identity;
+using LanInspector.Core.Model;
+using LanInspector.Core.Scanning;
 
 namespace LanInspector.UI.ViewModels;
 
 public sealed partial class MainViewModel : ObservableObject, IDisposable
 {
+    private const string DiscoveryFilter = "ip or arp or udp port 53 or udp port 5353 or udp port 67 or udp port 68";
+
     private readonly ICaptureProvider _captureProvider;
-    private readonly ArpAnalyzer _arpAnalyzer;
+    private readonly IReadOnlyList<IDeviceObservingAnalyzer> _analyzers;
+    private readonly OuiVendorLookup _vendorLookup;
+    private readonly HostnameResolver _hostnameResolver;
+    private readonly PortScanner _portScanner;
+    private readonly Action _clearDeviceStore;
     private readonly Action<Action> _dispatchToUi;
+    private readonly HashSet<string> _reverseDnsAttempts = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _reverseDnsAttemptsLock = new();
+    private readonly CancellationTokenSource _shutdownCancellation = new();
+    private int _runNumber;
     private bool _disposed;
 
     public MainViewModel(
         ICaptureProvider captureProvider,
-        ArpAnalyzer arpAnalyzer,
+        IReadOnlyList<IDeviceObservingAnalyzer> analyzers,
+        OuiVendorLookup vendorLookup,
+        HostnameResolver hostnameResolver,
+        PortScanner portScanner,
+        Action clearDeviceStore,
         Action<Action> dispatchToUi)
     {
         _captureProvider = captureProvider;
-        _arpAnalyzer = arpAnalyzer;
+        _analyzers = analyzers;
+        _vendorLookup = vendorLookup;
+        _hostnameResolver = hostnameResolver;
+        _portScanner = portScanner;
+        _clearDeviceStore = clearDeviceStore;
         _dispatchToUi = dispatchToUi;
 
         _captureProvider.PacketCaptured += OnPacketCaptured;
-        _arpAnalyzer.DeviceObserved += OnDeviceObserved;
+        foreach (var analyzer in _analyzers)
+        {
+            analyzer.DeviceObserved += OnDeviceObserved;
+        }
 
-        CaptureFilter = "ip or arp";
+        CaptureFilter = DiscoveryFilter;
+        SelectedBpfFilterPreset = BpfFilterPresets.First();
+        StatusText = _vendorLookup.Count > 0
+            ? $"Loaded {_vendorLookup.Count} OUI vendor prefix(es)."
+            : "Ready. Add more vendor prefixes to Data/oui.csv for richer vendor names.";
         RefreshInterfaces();
     }
 
@@ -33,11 +63,25 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     public ObservableCollection<DeviceRowViewModel> Devices { get; } = [];
 
+    public ObservableCollection<CaptureRunHistoryItemViewModel> RunHistory { get; } = [];
+
+    public ObservableCollection<BpfFilterPresetViewModel> BpfFilterPresets { get; } =
+    [
+        new("Discovery", DiscoveryFilter, "ARP, DNS, mDNS, DHCP, IP"),
+        new("ARP only", "arp", "Local MAC/IP mapping"),
+        new("DNS + mDNS", "udp port 53 or udp port 5353", "Names and service hints"),
+        new("DHCP", "udp port 67 or udp port 68", "Lease hostnames and vendor class"),
+        new("Web", "tcp port 80 or tcp port 443", "HTTP and HTTPS traffic"),
+        new("All IP", "ip", "IPv4/IPv6 traffic only"),
+        new("All traffic", string.Empty, "No BPF filter")
+    ];
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsNotCapturing))]
     [NotifyCanExecuteChangedFor(nameof(StartCaptureCommand))]
     [NotifyCanExecuteChangedFor(nameof(StopCaptureCommand))]
     [NotifyCanExecuteChangedFor(nameof(RefreshInterfacesCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ClearResultsCommand))]
     private bool _isCapturing;
 
     public bool IsNotCapturing => !IsCapturing;
@@ -47,6 +91,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private CaptureDeviceInfo? _selectedInterface;
 
     [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(ScanSelectedPortsCommand))]
+    private DeviceRowViewModel? _selectedDevice;
+
+    [ObservableProperty]
+    private BpfFilterPresetViewModel? _selectedBpfFilterPreset;
+
+    [ObservableProperty]
     private string _captureFilter = string.Empty;
 
     [ObservableProperty]
@@ -54,6 +105,16 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private long _packetCount;
+
+    partial void OnSelectedBpfFilterPresetChanged(BpfFilterPresetViewModel? value)
+    {
+        if (value is null || IsCapturing)
+        {
+            return;
+        }
+
+        CaptureFilter = value.Filter;
+    }
 
     [RelayCommand(CanExecute = nameof(CanRefreshInterfaces))]
     private void RefreshInterfaces()
@@ -134,6 +195,88 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         return IsCapturing;
     }
 
+    [RelayCommand(CanExecute = nameof(CanClearResults))]
+    private void ClearResults()
+    {
+        if (Devices.Count > 0 || PacketCount > 0)
+        {
+            RunHistory.Insert(0, new CaptureRunHistoryItemViewModel(
+                ++_runNumber,
+                DateTime.UtcNow,
+                PacketCount,
+                Devices.Count,
+                string.IsNullOrWhiteSpace(CaptureFilter) ? "All traffic" : CaptureFilter,
+                Devices.ToArray()));
+        }
+
+        Devices.Clear();
+        SelectedDevice = null;
+        PacketCount = 0;
+        lock (_reverseDnsAttemptsLock)
+        {
+            _reverseDnsAttempts.Clear();
+        }
+        _clearDeviceStore();
+        StatusText = RunHistory.Count == 0
+            ? "Results cleared."
+            : $"Results cleared and saved to history as run {_runNumber}.";
+    }
+
+    private bool CanClearResults()
+    {
+        return !IsCapturing;
+    }
+
+    [RelayCommand(CanExecute = nameof(CanScanSelectedPorts))]
+    private async Task ScanSelectedPortsAsync()
+    {
+        var selectedDevice = SelectedDevice;
+        if (selectedDevice is null)
+        {
+            return;
+        }
+
+        string? ipAddress;
+        lock (selectedDevice.Device)
+        {
+            ipAddress = selectedDevice.Device.IpAddresses.FirstOrDefault(value => IPAddress.TryParse(value, out _));
+        }
+
+        if (!IPAddress.TryParse(ipAddress, out var parsedAddress))
+        {
+            StatusText = "Selected device has no valid IP address to scan.";
+            return;
+        }
+
+        StatusText = $"Scanning common ports on {parsedAddress}...";
+        var results = await _portScanner.ScanCommonPortsAsync(
+            parsedAddress,
+            TimeSpan.FromMilliseconds(750),
+            _shutdownCancellation.Token);
+
+        lock (selectedDevice.Device)
+        {
+            foreach (var result in results)
+            {
+                selectedDevice.Device.OpenPorts.Add(result.Port);
+                selectedDevice.Device.PortServices[result.Port] = result.ServiceName;
+            }
+
+            selectedDevice.Device.SeenVia.Add("TCP scan");
+            selectedDevice.Device.LastSeen = DateTime.UtcNow;
+        }
+
+        selectedDevice.Update(selectedDevice.Device);
+        StatusText = results.Count == 0
+            ? $"No common ports responded on {parsedAddress}."
+            : $"Found {results.Count} open common port(s) on {parsedAddress}.";
+    }
+
+    private bool CanScanSelectedPorts()
+    {
+        return SelectedDevice is not null;
+    }
+
     public void Dispose()
     {
         if (_disposed)
@@ -141,20 +284,39 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
+        _shutdownCancellation.Cancel();
         _captureProvider.PacketCaptured -= OnPacketCaptured;
-        _arpAnalyzer.DeviceObserved -= OnDeviceObserved;
+        foreach (var analyzer in _analyzers)
+        {
+            analyzer.DeviceObserved -= OnDeviceObserved;
+        }
+
         _captureProvider.Dispose();
+        _shutdownCancellation.Dispose();
         _disposed = true;
     }
 
     private void OnPacketCaptured(object? sender, PacketCapturedEventArgs e)
     {
-        _arpAnalyzer.Analyze(e.ParsedPacket);
+        foreach (var analyzer in _analyzers)
+        {
+            try
+            {
+                analyzer.Analyze(e.ParsedPacket);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Analyzer {analyzer.GetType().Name} failed: {ex}");
+            }
+        }
+
         _dispatchToUi(() => PacketCount++);
     }
 
     private void OnDeviceObserved(object? sender, DeviceObservedEventArgs e)
     {
+        EnrichDevice(e.Device);
+
         _dispatchToUi(() =>
         {
             var existing = Devices.FirstOrDefault(device => device.MacAddress == e.Device.MacAddress);
@@ -166,5 +328,61 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
             existing.Update(e.Device);
         });
+    }
+
+    private void EnrichDevice(Device device)
+    {
+        lock (device)
+        {
+            device.Vendor ??= _vendorLookup.LookupVendor(device.MacAddress);
+        }
+
+        _ = TryReverseDnsAsync(device);
+    }
+
+    private async Task TryReverseDnsAsync(Device device)
+    {
+        string[] addresses;
+        lock (device)
+        {
+            if (!string.IsNullOrWhiteSpace(device.Hostname))
+            {
+                return;
+            }
+
+            addresses = device.IpAddresses.ToArray();
+        }
+
+        foreach (var address in addresses)
+        {
+            lock (_reverseDnsAttemptsLock)
+            {
+                if (!_reverseDnsAttempts.Add(address))
+                {
+                    continue;
+                }
+            }
+
+            var hostname = await _hostnameResolver.TryReverseDnsAsync(address, TimeSpan.FromSeconds(1));
+            if (string.IsNullOrWhiteSpace(hostname))
+            {
+                continue;
+            }
+
+            lock (device)
+            {
+                device.Hostname ??= hostname;
+                device.ObservedNames.Add(hostname);
+                device.SeenVia.Add("Reverse DNS");
+                device.LastSeen = DateTime.UtcNow;
+            }
+
+            _dispatchToUi(() =>
+            {
+                var existing = Devices.FirstOrDefault(row => row.MacAddress == device.MacAddress);
+                existing?.Update(device);
+            });
+            return;
+        }
     }
 }

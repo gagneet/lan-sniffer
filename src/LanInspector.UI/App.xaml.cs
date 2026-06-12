@@ -1,8 +1,11 @@
 using System.Collections.Concurrent;
+using System.IO;
 using System.Windows;
 using LanInspector.Core.Analysis;
 using LanInspector.Core.Capture;
+using LanInspector.Core.Identity;
 using LanInspector.Core.Model;
+using LanInspector.Core.Scanning;
 using LanInspector.UI.ViewModels;
 using LanInspector.UI.Views;
 
@@ -18,11 +21,23 @@ public partial class App : Application
 
         var devices = new ConcurrentDictionary<string, Device>();
         _captureProvider = new PcapCaptureProvider();
-        var arpAnalyzer = new ArpAnalyzer(devices);
+        var analyzers = new IDeviceObservingAnalyzer[]
+        {
+            new ArpAnalyzer(devices),
+            new DnsAnalyzer(devices),
+            new DhcpAnalyzer(devices)
+        };
+
+        var vendorLookup = new OuiVendorLookup();
+        vendorLookup.LoadCsv(Path.Combine(AppContext.BaseDirectory, "Data", "oui.csv"));
 
         var viewModel = new MainViewModel(
             _captureProvider,
-            arpAnalyzer,
+            analyzers,
+            vendorLookup,
+            new HostnameResolver(),
+            new PortScanner(),
+            devices.Clear,
             action =>
             {
                 if (Dispatcher.CheckAccess())

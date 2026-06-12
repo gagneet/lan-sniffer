@@ -13,4 +13,10 @@
   <ItemGroup>
     <ProjectReference Include="..\LanInspector.Core\LanInspector.Core.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Data\oui.csv">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
 </Project>

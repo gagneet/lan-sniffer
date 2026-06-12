@@ -2,10 +2,10 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="LanInspector"
-        Width="1040"
-        Height="680"
-        MinWidth="820"
-        MinHeight="520"
+        Width="1320"
+        Height="780"
+        MinWidth="1040"
+        MinHeight="620"
         WindowStartupLocation="CenterScreen">
     <DockPanel Background="#F4F6F8">
         <Border DockPanel.Dock="Top"
@@ -62,7 +62,8 @@
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="2*" />
-                        <ColumnDefinition Width="220" />
+                        <ColumnDefinition Width="210" />
+                        <ColumnDefinition Width="3*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
 
@@ -79,6 +80,17 @@
 
                     <StackPanel Grid.Column="1"
                                 Margin="0,0,12,0">
+                        <TextBlock Text="Preset"
+                                   FontWeight="SemiBold"
+                                   Margin="0,0,0,6" />
+                        <ComboBox ItemsSource="{Binding BpfFilterPresets}"
+                                  SelectedItem="{Binding SelectedBpfFilterPreset}"
+                                  DisplayMemberPath="DisplayText"
+                                  IsEnabled="{Binding IsNotCapturing}" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="2"
+                                Margin="0,0,12,0">
                         <TextBlock Text="BPF filter"
                                    FontWeight="SemiBold"
                                    Margin="0,0,0,6" />
@@ -86,7 +98,7 @@
                                  IsEnabled="{Binding IsNotCapturing}" />
                     </StackPanel>
 
-                    <StackPanel Grid.Column="2"
+                    <StackPanel Grid.Column="3"
                                 Orientation="Horizontal"
                                 VerticalAlignment="Bottom">
                         <Button Content="Refresh"
@@ -96,46 +108,107 @@
                                 Command="{Binding StartCaptureCommand}" />
                         <Button Content="Stop"
                                 Command="{Binding StopCaptureCommand}" />
+                        <Button Content="Clear"
+                                Command="{Binding ClearResultsCommand}" />
+                        <Button Content="Scan Ports"
+                                Command="{Binding ScanSelectedPortsCommand}" />
                     </StackPanel>
                 </Grid>
             </Border>
 
-            <Border Grid.Row="1"
-                    Background="White"
-                    BorderBrush="#D9E0E7"
-                    BorderThickness="1"
-                    CornerRadius="6">
-                <DataGrid ItemsSource="{Binding Devices}"
-                          AutoGenerateColumns="False"
-                          IsReadOnly="True"
-                          CanUserAddRows="False"
-                          CanUserDeleteRows="False"
-                          GridLinesVisibility="Horizontal"
-                          HeadersVisibility="Column"
-                          RowHeaderWidth="0"
-                          BorderThickness="0">
-                    <DataGrid.Columns>
-                        <DataGridTextColumn Header="MAC address"
-                                            Binding="{Binding MacAddress}"
-                                            Width="180" />
-                        <DataGridTextColumn Header="IP addresses"
-                                            Binding="{Binding IpAddresses}"
-                                            Width="*" />
-                        <DataGridTextColumn Header="Hostname"
-                                            Binding="{Binding Hostname}"
-                                            Width="180" />
-                        <DataGridTextColumn Header="Vendor"
-                                            Binding="{Binding Vendor}"
-                                            Width="180" />
-                        <DataGridTextColumn Header="First seen"
-                                            Binding="{Binding FirstSeenLocal}"
-                                            Width="150" />
-                        <DataGridTextColumn Header="Last seen"
-                                            Binding="{Binding LastSeenLocal}"
-                                            Width="150" />
-                    </DataGrid.Columns>
-                </DataGrid>
-            </Border>
+            <Grid Grid.Row="1">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="280" />
+                </Grid.ColumnDefinitions>
+
+                <Border Background="White"
+                        BorderBrush="#D9E0E7"
+                        BorderThickness="1"
+                        CornerRadius="6"
+                        Margin="0,0,14,0">
+                    <DataGrid ItemsSource="{Binding Devices}"
+                              SelectedItem="{Binding SelectedDevice}"
+                              AutoGenerateColumns="False"
+                              IsReadOnly="True"
+                              CanUserAddRows="False"
+                              CanUserDeleteRows="False"
+                              GridLinesVisibility="Horizontal"
+                              HeadersVisibility="Column"
+                              RowHeaderWidth="0"
+                              BorderThickness="0">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Display name"
+                                                Binding="{Binding DisplayName}"
+                                                Width="190" />
+                            <DataGridTextColumn Header="IP addresses"
+                                                Binding="{Binding IpAddresses}"
+                                                Width="190" />
+                            <DataGridTextColumn Header="MAC address"
+                                                Binding="{Binding MacAddress}"
+                                                Width="160" />
+                            <DataGridTextColumn Header="Vendor"
+                                                Binding="{Binding Vendor}"
+                                                Width="170" />
+                            <DataGridTextColumn Header="Hostname"
+                                                Binding="{Binding Hostname}"
+                                                Width="180" />
+                            <DataGridTextColumn Header="DHCP class"
+                                                Binding="{Binding DhcpVendorClass}"
+                                                Width="150" />
+                            <DataGridTextColumn Header="Open ports"
+                                                Binding="{Binding OpenPorts}"
+                                                Width="170" />
+                            <DataGridTextColumn Header="Seen via"
+                                                Binding="{Binding SeenVia}"
+                                                Width="160" />
+                            <DataGridTextColumn Header="Last seen"
+                                                Binding="{Binding LastSeenLocal}"
+                                                Width="150" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Border>
+
+                <Border Grid.Column="1"
+                        Background="White"
+                        BorderBrush="#D9E0E7"
+                        BorderThickness="1"
+                        CornerRadius="6"
+                        Padding="12">
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Top"
+                                   Text="Run history"
+                                   FontWeight="SemiBold"
+                                   Margin="0,0,0,10" />
+                        <ListBox ItemsSource="{Binding RunHistory}"
+                                 BorderThickness="0">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Border BorderBrush="#E3E8EE"
+                                            BorderThickness="0,0,0,1"
+                                            Padding="0,8">
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Summary}"
+                                                       FontWeight="SemiBold" />
+                                            <TextBlock Text="{Binding CapturedAtLocal}"
+                                                       Foreground="#5C6A78"
+                                                       Margin="0,3,0,0" />
+                                            <TextBlock Text="{Binding DevicePreview}"
+                                                       TextWrapping="Wrap"
+                                                       Foreground="#304050"
+                                                       Margin="0,6,0,0" />
+                                            <TextBlock Text="{Binding Filter}"
+                                                       TextWrapping="Wrap"
+                                                       Foreground="#7A8794"
+                                                       Margin="0,6,0,0" />
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </DockPanel>
+                </Border>
+            </Grid>
         </Grid>
     </DockPanel>
 </Window>
