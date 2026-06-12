@@ -35,7 +35,10 @@ public partial class App : Application
         var vendorLookup = new OuiVendorLookup();
         vendorLookup.LoadCsv(Path.Combine(AppContext.BaseDirectory, "Data", "oui.csv"));
 
-        var knownDevices = KnownDevicesConfiguration.Load(Path.Combine(AppContext.BaseDirectory, "Data", "known-devices.json"));
+        var dataDirectory = Path.Combine(AppContext.BaseDirectory, "Data");
+        var knownDevices = KnownDevicesConfiguration.LoadMany(
+            Path.Combine(dataDirectory, "known-devices.json"),
+            Path.Combine(dataDirectory, "known-devices.local.json"));
         var localNetworkProvider = new LocalNetworkProfileProvider();
 
         var viewModel = new MainViewModel(

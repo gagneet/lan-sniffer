@@ -1,0 +1,46 @@
+{
+  "knownDevices": [
+    {
+      "id": "home-server",
+      "displayName": "Home Server",
+      "deviceType": "Server",
+      "knownIps": [
+        "192.168.0.148",
+        "192.168.87.243"
+      ],
+      "ssh": {
+        "enabled": true,
+        "user": "your-ssh-user",
+        "port": 22
+      },
+      "tags": [
+        "critical",
+        "server"
+      ]
+    },
+    {
+      "id": "fast5366lte-a",
+      "displayName": "FAST5366LTE-A / Optus Modem",
+      "deviceType": "Router",
+      "knownIps": [
+        "192.168.0.1"
+      ],
+      "tags": [
+        "router",
+        "gateway"
+      ]
+    },
+    {
+      "id": "google-nest",
+      "displayName": "Google Nest Router / Mesh",
+      "deviceType": "Router",
+      "knownSubnets": [
+        "192.168.87.0/24"
+      ],
+      "tags": [
+        "router",
+        "mesh"
+      ]
+    }
+  ]
+}

@@ -4,3 +4,4 @@ obj/
 .idea/
 *.user
 *.suo
+src/LanInspector.UI/Data/known-devices.local.json

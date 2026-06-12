@@ -7,6 +7,36 @@ public sealed class KnownDevicesConfiguration
 {
     public List<KnownDeviceDefinition> KnownDevices { get; init; } = [];
 
+    public static KnownDevicesConfiguration LoadMany(params string[] paths)
+    {
+        var merged = new KnownDevicesConfiguration();
+        var indexById = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var path in paths)
+        {
+            var configuration = Load(path);
+            foreach (var knownDevice in configuration.KnownDevices)
+            {
+                if (string.IsNullOrWhiteSpace(knownDevice.Id))
+                {
+                    merged.KnownDevices.Add(knownDevice);
+                    continue;
+                }
+
+                if (indexById.TryGetValue(knownDevice.Id, out var existingIndex))
+                {
+                    merged.KnownDevices[existingIndex] = knownDevice;
+                    continue;
+                }
+
+                indexById[knownDevice.Id] = merged.KnownDevices.Count;
+                merged.KnownDevices.Add(knownDevice);
+            }
+        }
+
+        return merged;
+    }
+
     public static KnownDevicesConfiguration Load(string path)
     {
         if (!File.Exists(path))
