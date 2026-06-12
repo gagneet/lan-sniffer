@@ -56,7 +56,7 @@ public sealed class DnsAnalyzer : IDeviceObservingAnalyzer
                     continue;
                 }
 
-                UpdateByIp(answer.Data, name, seenVia);
+                UpdateByIp(answer.Data, name, seenVia, preferHostname: true);
             }
 
             if (sourceAddress is null)
@@ -79,35 +79,35 @@ public sealed class DnsAnalyzer : IDeviceObservingAnalyzer
         }
     }
 
-    private void UpdateByIp(string ipAddress, string name, string seenVia, bool preferHostname = true)
+    private void UpdateByIp(string ipAddress, string name, string seenVia, bool preferHostname)
     {
         foreach (var device in _devices.Values)
         {
-            var changed = false;
+            bool isMatch;
+            lock (device)
+            {
+                isMatch = device.IpAddresses.Contains(ipAddress);
+            }
+
+            if (!isMatch)
+            {
+                continue;
+            }
 
             lock (device)
             {
-                if (!device.IpAddresses.Contains(ipAddress))
-                {
-                    continue;
-                }
-
                 device.ObservedNames.Add(name);
                 device.SeenVia.Add(seenVia);
 
-                if (preferHostname || string.IsNullOrWhiteSpace(device.Hostname))
+                if (preferHostname && string.IsNullOrWhiteSpace(device.Hostname))
                 {
                     device.Hostname = name;
                 }
 
                 device.LastSeen = DateTime.UtcNow;
-                changed = true;
             }
 
-            if (changed)
-            {
-                DeviceObserved?.Invoke(this, new DeviceObservedEventArgs(device));
-            }
+            DeviceObserved?.Invoke(this, new DeviceObservedEventArgs(device));
         }
     }
 

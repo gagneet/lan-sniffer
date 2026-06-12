@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Net;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -22,6 +23,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly Action _clearDeviceStore;
     private readonly Action<Action> _dispatchToUi;
     private readonly HashSet<string> _reverseDnsAttempts = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _reverseDnsAttemptsLock = new();
+    private readonly CancellationTokenSource _shutdownCancellation = new();
     private int _runNumber;
     private bool _disposed;
 
@@ -209,7 +212,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         Devices.Clear();
         SelectedDevice = null;
         PacketCount = 0;
-        _reverseDnsAttempts.Clear();
+        lock (_reverseDnsAttemptsLock)
+        {
+            _reverseDnsAttempts.Clear();
+        }
         _clearDeviceStore();
         StatusText = RunHistory.Count == 0
             ? "Results cleared."
@@ -224,15 +230,16 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand(CanExecute = nameof(CanScanSelectedPorts))]
     private async Task ScanSelectedPortsAsync()
     {
-        if (SelectedDevice is null)
+        var selectedDevice = SelectedDevice;
+        if (selectedDevice is null)
         {
             return;
         }
 
         string? ipAddress;
-        lock (SelectedDevice.Device)
+        lock (selectedDevice.Device)
         {
-            ipAddress = SelectedDevice.Device.IpAddresses.FirstOrDefault(value => IPAddress.TryParse(value, out _));
+            ipAddress = selectedDevice.Device.IpAddresses.FirstOrDefault(value => IPAddress.TryParse(value, out _));
         }
 
         if (!IPAddress.TryParse(ipAddress, out var parsedAddress))
@@ -242,21 +249,24 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
 
         StatusText = $"Scanning common ports on {parsedAddress}...";
-        var results = await _portScanner.ScanCommonPortsAsync(parsedAddress, TimeSpan.FromMilliseconds(750));
+        var results = await _portScanner.ScanCommonPortsAsync(
+            parsedAddress,
+            TimeSpan.FromMilliseconds(750),
+            _shutdownCancellation.Token);
 
-        lock (SelectedDevice.Device)
+        lock (selectedDevice.Device)
         {
             foreach (var result in results)
             {
-                SelectedDevice.Device.OpenPorts.Add(result.Port);
-                SelectedDevice.Device.PortServices[result.Port] = result.ServiceName;
+                selectedDevice.Device.OpenPorts.Add(result.Port);
+                selectedDevice.Device.PortServices[result.Port] = result.ServiceName;
             }
 
-            SelectedDevice.Device.SeenVia.Add("TCP scan");
-            SelectedDevice.Device.LastSeen = DateTime.UtcNow;
+            selectedDevice.Device.SeenVia.Add("TCP scan");
+            selectedDevice.Device.LastSeen = DateTime.UtcNow;
         }
 
-        SelectedDevice.Update(SelectedDevice.Device);
+        selectedDevice.Update(selectedDevice.Device);
         StatusText = results.Count == 0
             ? $"No common ports responded on {parsedAddress}."
             : $"Found {results.Count} open common port(s) on {parsedAddress}.";
@@ -274,6 +284,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
+        _shutdownCancellation.Cancel();
         _captureProvider.PacketCaptured -= OnPacketCaptured;
         foreach (var analyzer in _analyzers)
         {
@@ -281,6 +292,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
 
         _captureProvider.Dispose();
+        _shutdownCancellation.Dispose();
         _disposed = true;
     }
 
@@ -292,9 +304,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             {
                 analyzer.Analyze(e.ParsedPacket);
             }
-            catch
+            catch (Exception ex)
             {
-                // Keep packet processing resilient; individual analyzer failures should not stop capture.
+                Debug.WriteLine($"Analyzer {analyzer.GetType().Name} failed: {ex}");
             }
         }
 
@@ -343,9 +355,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         foreach (var address in addresses)
         {
-            if (!_reverseDnsAttempts.Add(address))
+            lock (_reverseDnsAttemptsLock)
             {
-                continue;
+                if (!_reverseDnsAttempts.Add(address))
+                {
+                    continue;
+                }
             }
 
             var hostname = await _hostnameResolver.TryReverseDnsAsync(address, TimeSpan.FromSeconds(1));

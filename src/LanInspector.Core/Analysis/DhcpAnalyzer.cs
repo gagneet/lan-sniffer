@@ -40,7 +40,7 @@ public sealed class DhcpAnalyzer : IDeviceObservingAnalyzer
             return;
         }
 
-        var mac = BitConverter.ToString(payload, 28, Math.Min(6, (int)hardwareLength));
+        var mac = BitConverter.ToString(payload, 28, Math.Min(6, (int)hardwareLength)).Replace("-", string.Empty);
         var assignedAddress = string.Join('.', payload.Skip(16).Take(4));
         var requestedAddress = string.Empty;
         var hostname = string.Empty;

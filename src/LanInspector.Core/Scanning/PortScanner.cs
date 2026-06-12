@@ -45,17 +45,15 @@ public sealed class PortScanner
         try
         {
             using var client = new TcpClient(ipAddress.AddressFamily);
-            var connectTask = client.ConnectAsync(ipAddress, port, cancellationToken).AsTask();
-            var timeoutTask = Task.Delay(timeout, cancellationToken);
-            var completed = await Task.WhenAny(connectTask, timeoutTask);
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(timeout);
 
-            if (completed != connectTask)
-            {
-                return new PortScanResult(port, false, CommonServices[port]);
-            }
-
-            await connectTask;
+            await client.ConnectAsync(ipAddress, port, timeoutCts.Token);
             return new PortScanResult(port, client.Connected, CommonServices[port]);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return new PortScanResult(port, false, CommonServices[port]);
         }
         catch
         {

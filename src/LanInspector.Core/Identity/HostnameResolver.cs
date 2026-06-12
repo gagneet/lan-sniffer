@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Sockets;
 
 namespace LanInspector.Core.Identity;
 
@@ -11,17 +12,16 @@ public sealed class HostnameResolver
             return null;
         }
 
+        using var cts = new CancellationTokenSource(timeout);
+
         try
         {
-            var lookupTask = Dns.GetHostEntryAsync(address);
-            var completed = await Task.WhenAny(lookupTask, Task.Delay(timeout));
-            if (completed != lookupTask)
-            {
-                return null;
-            }
-
-            var entry = await lookupTask;
+            var entry = await Dns.GetHostEntryAsync(address.ToString(), AddressFamily.Unspecified, cts.Token);
             return string.IsNullOrWhiteSpace(entry.HostName) ? null : entry.HostName;
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+            return null;
         }
         catch
         {
