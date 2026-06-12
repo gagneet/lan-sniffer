@@ -4,7 +4,7 @@ using PacketDotNet;
 
 namespace LanInspector.Core.Analysis;
 
-public sealed class ArpAnalyzer : IPacketAnalyzer
+public sealed class ArpAnalyzer : IDeviceObservingAnalyzer
 {
     private readonly ConcurrentDictionary<string, Device> _devices;
 
@@ -41,6 +41,7 @@ public sealed class ArpAnalyzer : IPacketAnalyzer
                 };
 
                 created.IpAddresses.Add(ip);
+                created.SeenVia.Add("ARP");
                 return created;
             },
             (_, existing) =>
@@ -48,6 +49,7 @@ public sealed class ArpAnalyzer : IPacketAnalyzer
                 lock (existing)
                 {
                     existing.IpAddresses.Add(ip);
+                    existing.SeenVia.Add("ARP");
                     existing.LastSeen = now;
                 }
 
