@@ -38,6 +38,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly SemaphoreSlim _routeDiagnosticsGate = new(2);
     private readonly CancellationTokenSource _shutdownCancellation = new();
     private int _runNumber;
+    private bool _currentRunArchived;
     private bool _disposed;
 
     public MainViewModel(
@@ -75,6 +76,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             CriticalDevices.Add(new CriticalDeviceViewModel(knownDevice));
         }
+
+        CriticalDevicesStatusText = CriticalDevices.Count == 0
+            ? "No critical devices configured. Create Data/known-devices.local.json from known-devices.example.json."
+            : $"Loaded {CriticalDevices.Count} critical device(s).";
 
         CaptureFilter = DiscoveryFilter;
         SelectedBpfFilterPreset = BpfFilterPresets.First();
@@ -144,6 +149,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private string _networkSummary = "Network profile not loaded.";
 
     [ObservableProperty]
+    private string _criticalDevicesStatusText = string.Empty;
+
+    [ObservableProperty]
     private long _packetCount;
 
     partial void OnSelectedBpfFilterPresetChanged(BpfFilterPresetViewModel? value)
@@ -193,7 +201,18 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         try
         {
+            if (HasCurrentRunData())
+            {
+                if (!_currentRunArchived)
+                {
+                    ArchiveCurrentRun();
+                }
+
+                ClearCurrentResults();
+            }
+
             PacketCount = 0;
+            _currentRunArchived = false;
             _captureProvider.Start(SelectedInterface.Name, CaptureFilter);
             IsCapturing = true;
             StatusText = $"Capturing on {SelectedInterface.Description}.";
@@ -213,7 +232,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         try
         {
             _captureProvider.Stop();
-            StatusText = "Capture stopped.";
+            var archived = ArchiveCurrentRun();
+            StatusText = archived ? $"Capture stopped and saved to history as run {_runNumber}." : "Capture stopped.";
         }
         catch (Exception ex)
         {
@@ -230,17 +250,42 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand(CanExecute = nameof(CanClearResults))]
     private void ClearResults()
     {
-        if (Devices.Count > 0 || PacketCount > 0)
+        var archived = !_currentRunArchived && ArchiveCurrentRun();
+        ClearCurrentResults();
+        StatusText = archived
+            ? $"Results cleared and saved to history as run {_runNumber}."
+            : "Results cleared.";
+    }
+
+    private bool CanClearResults() => !IsCapturing;
+
+    private bool HasCurrentRunData() => Devices.Count > 0 || PacketCount > 0;
+
+    private bool ArchiveCurrentRun()
+    {
+        if (!HasCurrentRunData())
         {
-            RunHistory.Insert(0, new CaptureRunHistoryItemViewModel(
-                ++_runNumber,
-                DateTime.UtcNow,
-                PacketCount,
-                Devices.Count,
-                string.IsNullOrWhiteSpace(CaptureFilter) ? "All traffic" : CaptureFilter,
-                Devices.ToArray()));
+            return false;
         }
 
+        if (_currentRunArchived)
+        {
+            return false;
+        }
+
+        RunHistory.Insert(0, new CaptureRunHistoryItemViewModel(
+            ++_runNumber,
+            DateTime.UtcNow,
+            PacketCount,
+            Devices.Count,
+            string.IsNullOrWhiteSpace(CaptureFilter) ? "All traffic" : CaptureFilter,
+            Devices.ToArray()));
+        _currentRunArchived = true;
+        return true;
+    }
+
+    private void ClearCurrentResults()
+    {
         Devices.Clear();
         SelectedDevice = null;
         PacketCount = 0;
@@ -248,22 +293,36 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             _reverseDnsAttempts.Clear();
         }
-        _clearDeviceStore();
-        StatusText = RunHistory.Count == 0
-            ? "Results cleared."
-            : $"Results cleared and saved to history as run {_runNumber}.";
-    }
 
-    private bool CanClearResults() => !IsCapturing;
+        lock (_routeRefreshLock)
+        {
+            _pendingRouteRefreshes.Clear();
+        }
+
+        _clearDeviceStore();
+        _currentRunArchived = false;
+    }
 
     [RelayCommand]
     private async Task RefreshCriticalDevicesAsync()
     {
+        if (CriticalDevices.Count == 0)
+        {
+            CriticalDevicesStatusText = "No critical devices configured. Create Data/known-devices.local.json from known-devices.example.json.";
+            return;
+        }
+
+        CriticalDevicesStatusText = "Checking critical devices...";
+        var onlineCount = 0;
+
         foreach (var criticalDevice in CriticalDevices)
         {
             try
             {
-                await RefreshCriticalDeviceAsync(criticalDevice);
+                if (await RefreshCriticalDeviceAsync(criticalDevice))
+                {
+                    onlineCount++;
+                }
             }
             catch (Exception ex)
             {
@@ -271,6 +330,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 criticalDevice.Update("Check failed", criticalDevice.CurrentIp, ex.Message);
             }
         }
+
+        CriticalDevicesStatusText = $"Checked {CriticalDevices.Count} critical device(s); {onlineCount} online.";
     }
 
     [RelayCommand(CanExecute = nameof(CanScanSelectedPorts))]
@@ -308,6 +369,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
 
         selectedDevice.Update(selectedDevice.Device);
+        RefreshSelectedDeviceCommands();
         await RefreshRouteForRowAsync(selectedDevice);
         StatusText = results.Count == 0
             ? $"No common ports responded on {parsedAddress}."
@@ -414,6 +476,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             }
 
             existing.Update(e.Device);
+            if (ReferenceEquals(existing, SelectedDevice))
+            {
+                RefreshSelectedDeviceCommands();
+            }
+
             QueueRouteRefresh(existing);
         });
     }
@@ -491,7 +558,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    private async Task RefreshCriticalDeviceAsync(CriticalDeviceViewModel criticalDevice)
+    private async Task<bool> RefreshCriticalDeviceAsync(CriticalDeviceViewModel criticalDevice)
     {
         var candidates = criticalDevice.Definition.KnownIps
             .Select(ip => IPAddress.TryParse(ip, out var parsed) ? parsed : null)
@@ -509,7 +576,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             if (port.IsOpen)
             {
                 criticalDevice.Update("Online", candidate.ToString(), route.RouteSummary);
-                return;
+                return true;
             }
         }
 
@@ -519,6 +586,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             var route = await _routeDiagnostics.GetRouteToAsync(fallback, _shutdownCancellation.Token);
             criticalDevice.Update("Not reachable", fallback.ToString(), route.RouteSummary);
         }
+
+        return false;
     }
 
     private void QueueRouteRefresh(DeviceRowViewModel row)
@@ -588,7 +657,20 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
 
         var classification = _reachabilityClassifier.Classify(address, hasOpenTcpPort, route);
-        _dispatchToUi(() => row.ApplyNetworkClassification(classification));
+        _dispatchToUi(() =>
+        {
+            row.ApplyNetworkClassification(classification);
+            if (ReferenceEquals(row, SelectedDevice))
+            {
+                RefreshSelectedDeviceCommands();
+            }
+        });
+    }
+
+    private void RefreshSelectedDeviceCommands()
+    {
+        CopySelectedSshCommandCommand.NotifyCanExecuteChanged();
+        OpenSelectedSshCommand.NotifyCanExecuteChanged();
     }
 
     private void RefreshNetworkSummary()
