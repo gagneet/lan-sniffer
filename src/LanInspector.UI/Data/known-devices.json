@@ -1,16 +1,15 @@
 {
   "knownDevices": [
     {
-      "id": "home-server",
-      "displayName": "Home Server",
+      "id": "example-server",
+      "displayName": "Example Server",
       "deviceType": "Server",
       "knownIps": [
-        "192.168.0.148",
-        "192.168.87.243"
+        "192.168.1.100"
       ],
       "ssh": {
         "enabled": true,
-        "user": "gagneet",
+        "user": "<username>",
         "port": 22
       },
       "tags": [
@@ -19,40 +18,27 @@
       ]
     },
     {
-      "id": "fast5366lte-a",
-      "displayName": "FAST5366LTE-A / Optus Modem",
+      "id": "example-gateway",
+      "displayName": "Example Gateway",
       "deviceType": "Router",
       "knownIps": [
-        "192.168.0.1"
+        "192.168.1.1"
       ],
-      "expectedVendor": "Sagemcom Broadband SAS",
       "tags": [
         "router",
-        "gateway",
-        "optus"
+        "gateway"
       ]
     },
     {
-      "id": "google-nest",
-      "displayName": "Google Nest Router / Mesh",
+      "id": "example-mesh-router",
+      "displayName": "Example Mesh Router",
       "deviceType": "Router",
       "knownSubnets": [
-        "192.168.87.0/24"
+        "192.168.50.0/24"
       ],
       "tags": [
         "router",
-        "mesh",
-        "google-nest"
-      ]
-    },
-    {
-      "id": "eero-main",
-      "displayName": "Eero Main Router",
-      "deviceType": "Router",
-      "tags": [
-        "router",
-        "eero",
-        "upstream"
+        "mesh"
       ]
     }
   ]

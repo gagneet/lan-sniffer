@@ -21,8 +21,15 @@ public sealed class KnownDevicesConfiguration
             AllowTrailingCommas = true
         };
 
-        return JsonSerializer.Deserialize<KnownDevicesConfiguration>(File.ReadAllText(path), options)
-            ?? new KnownDevicesConfiguration();
+        try
+        {
+            return JsonSerializer.Deserialize<KnownDevicesConfiguration>(File.ReadAllText(path), options)
+                ?? new KnownDevicesConfiguration();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return new KnownDevicesConfiguration();
+        }
     }
 }
 

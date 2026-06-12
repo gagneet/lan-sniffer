@@ -11,7 +11,13 @@ public sealed class WindowsPowerShellRouteDiagnosticsService : IRouteDiagnostics
 {
     public async Task<RouteDecision> GetRouteToAsync(IPAddress target, CancellationToken cancellationToken = default)
     {
-        var script = $"Find-NetRoute -RemoteIPAddress {target} | Select-Object -First 1 InterfaceAlias,NextHop,IPAddress,RouteMetric | ConvertTo-Json -Compress";
+        var sanitizedTarget = target.ToString();
+        if (!IPAddress.TryParse(sanitizedTarget, out _))
+        {
+            return new RouteDecision(target, null, null, string.Empty, "Invalid IP address", ReachabilityKind.Unknown);
+        }
+
+        var script = $"Find-NetRoute -RemoteIPAddress {sanitizedTarget} | Select-Object -First 1 InterfaceAlias,NextHop,IPAddress,RouteMetric | ConvertTo-Json -Compress";
         var output = await RunPowerShellAsync(script, TimeSpan.FromSeconds(5), cancellationToken);
         if (string.IsNullOrWhiteSpace(output))
         {
@@ -27,8 +33,9 @@ public sealed class WindowsPowerShellRouteDiagnosticsService : IRouteDiagnostics
             var alias = TryGetString(root, "InterfaceAlias") ?? string.Empty;
             IPAddress.TryParse(nextHopText, out var nextHop);
             IPAddress.TryParse(sourceText, out var source);
+            nextHop = nextHop is not null && nextHop.Equals(IPAddress.Any) ? null : nextHop;
 
-            var summary = nextHop is null || nextHop.Equals(IPAddress.Any)
+            var summary = nextHop is null
                 ? $"Direct route on {alias}".Trim()
                 : $"via {nextHop} on {alias}".Trim();
 
@@ -52,7 +59,13 @@ public sealed class WindowsPowerShellRouteDiagnosticsService : IRouteDiagnostics
 
     public async Task<TraceRouteResult> TraceRouteAsync(IPAddress target, CancellationToken cancellationToken = default)
     {
-        var output = await RunProcessAsync("tracert.exe", $"-d -h 8 -w 750 {target}", TimeSpan.FromSeconds(10), cancellationToken);
+        var sanitizedTarget = target.ToString();
+        if (!IPAddress.TryParse(sanitizedTarget, out _))
+        {
+            return new TraceRouteResult(target, Array.Empty<string>(), "Invalid IP address");
+        }
+
+        var output = await RunProcessAsync("tracert.exe", $"-d -h 8 -w 750 {sanitizedTarget}", TimeSpan.FromSeconds(10), cancellationToken);
         var hops = output
             .Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Where(line => line.Length > 0 && char.IsDigit(line[0]))
@@ -73,6 +86,7 @@ public sealed class WindowsPowerShellRouteDiagnosticsService : IRouteDiagnostics
 
     private static async Task<string> RunProcessAsync(string fileName, string arguments, TimeSpan timeout, CancellationToken cancellationToken)
     {
+        Process? process = null;
         try
         {
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -88,26 +102,53 @@ public sealed class WindowsPowerShellRouteDiagnosticsService : IRouteDiagnostics
                 CreateNoWindow = true
             };
 
-            using var process = Process.Start(startInfo);
+            process = Process.Start(startInfo);
             if (process is null)
             {
                 return string.Empty;
             }
 
-            var outputTask = process.StandardOutput.ReadToEndAsync(timeoutCts.Token);
-            var errorTask = process.StandardError.ReadToEndAsync(timeoutCts.Token);
-            await process.WaitForExitAsync(timeoutCts.Token);
-            var output = await outputTask;
-            var error = await errorTask;
-            return string.IsNullOrWhiteSpace(output) ? error : output;
+            try
+            {
+                var outputTask = process.StandardOutput.ReadToEndAsync(timeoutCts.Token);
+                var errorTask = process.StandardError.ReadToEndAsync(timeoutCts.Token);
+                await process.WaitForExitAsync(timeoutCts.Token);
+                var output = await outputTask;
+                var error = await errorTask;
+                return string.IsNullOrWhiteSpace(output) ? error : output;
+            }
+            catch (InvalidOperationException)
+            {
+                return string.Empty;
+            }
         }
         catch (OperationCanceledException)
         {
+            TryKillProcess(process);
             return string.Empty;
         }
         catch (Exception ex) when (ex is SocketException or InvalidOperationException or System.ComponentModel.Win32Exception)
         {
             return ex.Message;
+        }
+        finally
+        {
+            process?.Dispose();
+        }
+    }
+
+    private static void TryKillProcess(Process? process)
+    {
+        try
+        {
+            if (process is not null && !process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch
+        {
+            // Best effort cleanup only.
         }
     }
 }

@@ -32,7 +32,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly Action _clearDeviceStore;
     private readonly Action<Action> _dispatchToUi;
     private readonly HashSet<string> _reverseDnsAttempts = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _pendingRouteRefreshes = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _reverseDnsAttemptsLock = new();
+    private readonly object _routeRefreshLock = new();
+    private readonly SemaphoreSlim _routeDiagnosticsGate = new(2);
     private readonly CancellationTokenSource _shutdownCancellation = new();
     private int _runNumber;
     private bool _disposed;
@@ -258,7 +261,15 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         foreach (var criticalDevice in CriticalDevices)
         {
-            await RefreshCriticalDeviceAsync(criticalDevice);
+            try
+            {
+                await RefreshCriticalDeviceAsync(criticalDevice);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Critical device refresh failed for {criticalDevice.DisplayName}: {ex}");
+                criticalDevice.Update("Check failed", criticalDevice.CurrentIp, ex.Message);
+            }
         }
     }
 
@@ -366,6 +377,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         _captureProvider.Dispose();
         _shutdownCancellation.Dispose();
+        _routeDiagnosticsGate.Dispose();
         _disposed = true;
     }
 
@@ -397,12 +409,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             {
                 var row = new DeviceRowViewModel(e.Device);
                 Devices.Add(row);
-                _ = RefreshRouteForRowAsync(row);
+                QueueRouteRefresh(row);
                 return;
             }
 
             existing.Update(e.Device);
-            _ = RefreshRouteForRowAsync(existing);
+            QueueRouteRefresh(existing);
         });
     }
 
@@ -506,6 +518,48 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             var route = await _routeDiagnostics.GetRouteToAsync(fallback, _shutdownCancellation.Token);
             criticalDevice.Update("Not reachable", fallback.ToString(), route.RouteSummary);
+        }
+    }
+
+    private void QueueRouteRefresh(DeviceRowViewModel row)
+    {
+        var key = row.MacAddress;
+        lock (_routeRefreshLock)
+        {
+            if (!_pendingRouteRefreshes.Add(key))
+            {
+                return;
+            }
+        }
+
+        _ = RefreshRouteForRowQueuedAsync(row, key);
+    }
+
+    private async Task RefreshRouteForRowQueuedAsync(DeviceRowViewModel row, string key)
+    {
+        try
+        {
+            await Task.Delay(500, _shutdownCancellation.Token);
+            await _routeDiagnosticsGate.WaitAsync(_shutdownCancellation.Token);
+            try
+            {
+                await RefreshRouteForRowAsync(row);
+            }
+            finally
+            {
+                _routeDiagnosticsGate.Release();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutdown or clear cancelled this queued refresh.
+        }
+        finally
+        {
+            lock (_routeRefreshLock)
+            {
+                _pendingRouteRefreshes.Remove(key);
+            }
         }
     }
 

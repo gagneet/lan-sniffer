@@ -59,7 +59,7 @@ public sealed partial class DeviceRowViewModel : ObservableObject
     [ObservableProperty]
     private string _lastSeenLocal = string.Empty;
 
-    public bool HasSsh => OpenPorts.Contains("22", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(IpAddresses);
+    public bool HasSsh => !string.IsNullOrWhiteSpace(SshCommand);
 
     public void Update(Device device)
     {
@@ -67,6 +67,7 @@ public sealed partial class DeviceRowViewModel : ObservableObject
         string[] observedNames;
         string[] seenVia;
         string[] openPorts;
+        int[] openPortNumbers;
         string hostname;
         string vendor;
         string dhcpVendorClass;
@@ -78,8 +79,8 @@ public sealed partial class DeviceRowViewModel : ObservableObject
             ipAddresses = device.IpAddresses.OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToArray();
             observedNames = device.ObservedNames.OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToArray();
             seenVia = device.SeenVia.OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToArray();
-            openPorts = device.OpenPorts
-                .OrderBy(port => port)
+            openPortNumbers = device.OpenPorts.OrderBy(port => port).ToArray();
+            openPorts = openPortNumbers
                 .Select(port => device.PortServices.TryGetValue(port, out var service) ? $"{port} {service}" : port.ToString())
                 .ToArray();
             hostname = device.Hostname ?? string.Empty;
@@ -102,7 +103,7 @@ public sealed partial class DeviceRowViewModel : ObservableObject
         DhcpVendorClass = dhcpVendorClass;
         OpenPorts = string.Join(", ", openPorts);
         SeenVia = string.Join(", ", seenVia);
-        SshCommand = BuildSshCommand(ipAddresses.FirstOrDefault(), openPorts);
+        SshCommand = BuildSshCommand(ipAddresses.FirstOrDefault(), openPortNumbers);
         FirstSeenLocal = firstSeen.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
         LastSeenLocal = lastSeen.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
     }
@@ -123,9 +124,9 @@ public sealed partial class DeviceRowViewModel : ObservableObject
         RouteSummary = classification.RouteSummary;
     }
 
-    private static string BuildSshCommand(string? ipAddress, IReadOnlyCollection<string> openPorts)
+    private static string BuildSshCommand(string? ipAddress, IReadOnlyCollection<int> openPorts)
     {
-        if (string.IsNullOrWhiteSpace(ipAddress) || !openPorts.Any(port => port.StartsWith("22", StringComparison.OrdinalIgnoreCase)))
+        if (string.IsNullOrWhiteSpace(ipAddress) || !openPorts.Contains(22))
         {
             return string.Empty;
         }
