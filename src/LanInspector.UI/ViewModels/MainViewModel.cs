@@ -12,13 +12,17 @@ namespace LanInspector.UI.ViewModels;
 
 public sealed partial class MainViewModel : ObservableObject, IDisposable
 {
+    private const string DiscoveryFilter = "ip or arp or udp port 53 or udp port 5353 or udp port 67 or udp port 68";
+
     private readonly ICaptureProvider _captureProvider;
     private readonly IReadOnlyList<IDeviceObservingAnalyzer> _analyzers;
     private readonly OuiVendorLookup _vendorLookup;
     private readonly HostnameResolver _hostnameResolver;
     private readonly PortScanner _portScanner;
+    private readonly Action _clearDeviceStore;
     private readonly Action<Action> _dispatchToUi;
     private readonly HashSet<string> _reverseDnsAttempts = new(StringComparer.OrdinalIgnoreCase);
+    private int _runNumber;
     private bool _disposed;
 
     public MainViewModel(
@@ -27,6 +31,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         OuiVendorLookup vendorLookup,
         HostnameResolver hostnameResolver,
         PortScanner portScanner,
+        Action clearDeviceStore,
         Action<Action> dispatchToUi)
     {
         _captureProvider = captureProvider;
@@ -34,6 +39,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _vendorLookup = vendorLookup;
         _hostnameResolver = hostnameResolver;
         _portScanner = portScanner;
+        _clearDeviceStore = clearDeviceStore;
         _dispatchToUi = dispatchToUi;
 
         _captureProvider.PacketCaptured += OnPacketCaptured;
@@ -42,7 +48,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             analyzer.DeviceObserved += OnDeviceObserved;
         }
 
-        CaptureFilter = "ip or arp or udp port 53 or udp port 5353 or udp port 67 or udp port 68";
+        CaptureFilter = DiscoveryFilter;
+        SelectedBpfFilterPreset = BpfFilterPresets.First();
         StatusText = _vendorLookup.Count > 0
             ? $"Loaded {_vendorLookup.Count} OUI vendor prefix(es)."
             : "Ready. Add more vendor prefixes to Data/oui.csv for richer vendor names.";
@@ -53,11 +60,25 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     public ObservableCollection<DeviceRowViewModel> Devices { get; } = [];
 
+    public ObservableCollection<CaptureRunHistoryItemViewModel> RunHistory { get; } = [];
+
+    public ObservableCollection<BpfFilterPresetViewModel> BpfFilterPresets { get; } =
+    [
+        new("Discovery", DiscoveryFilter, "ARP, DNS, mDNS, DHCP, IP"),
+        new("ARP only", "arp", "Local MAC/IP mapping"),
+        new("DNS + mDNS", "udp port 53 or udp port 5353", "Names and service hints"),
+        new("DHCP", "udp port 67 or udp port 68", "Lease hostnames and vendor class"),
+        new("Web", "tcp port 80 or tcp port 443", "HTTP and HTTPS traffic"),
+        new("All IP", "ip", "IPv4/IPv6 traffic only"),
+        new("All traffic", string.Empty, "No BPF filter")
+    ];
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsNotCapturing))]
     [NotifyCanExecuteChangedFor(nameof(StartCaptureCommand))]
     [NotifyCanExecuteChangedFor(nameof(StopCaptureCommand))]
     [NotifyCanExecuteChangedFor(nameof(RefreshInterfacesCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ClearResultsCommand))]
     private bool _isCapturing;
 
     public bool IsNotCapturing => !IsCapturing;
@@ -71,6 +92,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private DeviceRowViewModel? _selectedDevice;
 
     [ObservableProperty]
+    private BpfFilterPresetViewModel? _selectedBpfFilterPreset;
+
+    [ObservableProperty]
     private string _captureFilter = string.Empty;
 
     [ObservableProperty]
@@ -78,6 +102,16 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private long _packetCount;
+
+    partial void OnSelectedBpfFilterPresetChanged(BpfFilterPresetViewModel? value)
+    {
+        if (value is null || IsCapturing)
+        {
+            return;
+        }
+
+        CaptureFilter = value.Filter;
+    }
 
     [RelayCommand(CanExecute = nameof(CanRefreshInterfaces))]
     private void RefreshInterfaces()
@@ -156,6 +190,35 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private bool CanStopCapture()
     {
         return IsCapturing;
+    }
+
+    [RelayCommand(CanExecute = nameof(CanClearResults))]
+    private void ClearResults()
+    {
+        if (Devices.Count > 0 || PacketCount > 0)
+        {
+            RunHistory.Insert(0, new CaptureRunHistoryItemViewModel(
+                ++_runNumber,
+                DateTime.UtcNow,
+                PacketCount,
+                Devices.Count,
+                string.IsNullOrWhiteSpace(CaptureFilter) ? "All traffic" : CaptureFilter,
+                Devices.ToArray()));
+        }
+
+        Devices.Clear();
+        SelectedDevice = null;
+        PacketCount = 0;
+        _reverseDnsAttempts.Clear();
+        _clearDeviceStore();
+        StatusText = RunHistory.Count == 0
+            ? "Results cleared."
+            : $"Results cleared and saved to history as run {_runNumber}.";
+    }
+
+    private bool CanClearResults()
+    {
+        return !IsCapturing;
     }
 
     [RelayCommand(CanExecute = nameof(CanScanSelectedPorts))]

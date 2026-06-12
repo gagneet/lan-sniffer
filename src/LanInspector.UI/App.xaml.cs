@@ -37,6 +37,7 @@ public partial class App : Application
             vendorLookup,
             new HostnameResolver(),
             new PortScanner(),
+            devices.Clear,
             action =>
             {
                 if (Dispatcher.CheckAccess())
