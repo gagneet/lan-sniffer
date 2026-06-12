@@ -30,6 +30,8 @@ LanInspector is a .NET 8 WPF desktop application for local network inspection. T
 - CSV-based OUI vendor lookup from `src/LanInspector.UI/Data/oui.csv`.
 - Reverse DNS fallback for devices that have an IP but no captured hostname yet.
 - Opt-in common TCP port scan from the selected device row.
+- Route-aware device classification with local segment, gateway and route summary fields.
+- Seeded known critical devices with SSH command actions for quick connection checks.
 
 ## Runtime Notes
 
