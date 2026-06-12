@@ -7,7 +7,7 @@ Examples from GitHub’s DNS‑tunnel topic:
 - **iodine** (classic DNS tunnel)  
 - **SlipStream** (Rust‑based DNS covert channel)  
 - **DNSTT** (UDP‑DNS/DoH/DoT tunneling)  
-  [Github](https://github.com/topics/dns-tunnel)
+  [GitHub](https://github.com/topics/dns-tunnel)
 
 Again, none of these help with LAN sniffing or topology discovery.
 

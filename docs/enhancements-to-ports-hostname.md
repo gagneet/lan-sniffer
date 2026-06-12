@@ -7,7 +7,7 @@
 | **Method** | **What it shows** | **Accuracy** | **Requires** |
 |---|---:|---:|---|
 | ARP + routing table | Which gateway a host uses | Medium | Local capture + OS routing info |
-| LLDP / CDP | Neighbor device and port info | High (managed gear) | LLDP/CDP packets or pktmon/pcap capture; admin rights |   [Github](https://github.com/gavc/clldp)
+| LLDP / CDP | Neighbor device and port info | High (managed gear) | LLDP/CDP packets or pktmon/pcap capture; admin rights |   [GitHub](https://github.com/gavc/clldp)
 | DHCP server logs | Which DHCP server leased IP | High | Access to DHCP server or capture DHCP packets |
 | SNMP queries | Switch MAC table, port mapping | High | SNMP read access to switches/routers |
 | Active traceroute/probes | Path to gateway | Medium | ICMP/TCP probes; may be blocked |
@@ -15,7 +15,7 @@
 ---
 
 ## How to get **Hostnames**
-1. **Passive DNS parsing** — parse DNS responses you capture (PacketDotNet + SharpPcap) and map IP→name from answers. **SharpPcap** is the recommended capture library for .NET.   [Github](https://github.com/OverTM/dotpcap.sharppcap)  
+1. **Passive DNS parsing** — parse DNS responses you capture (PacketDotNet + SharpPcap) and map IP→name from answers. **SharpPcap** is the recommended capture library for .NET.   [GitHub](https://github.com/OverTM/dotpcap.sharppcap)  
 2. **Reverse DNS lookup** (fallback): `Dns.GetHostEntry(ip)` in C# (async, with timeouts).  
 3. **mDNS / SSDP / NetBIOS / DHCP**: parse mDNS and SSDP packets to get friendly names; parse DHCP `hostname` and `vendor-class` options from DHCP packets captured on the wire.
 
@@ -30,7 +30,7 @@ device.Hostname = entry.HostName;
 ---
 
 ## How to get **Vendor (OUI)**
-- Use an OUI/vendor DB (Wireshark `manuf` or maintained JSON/CSV repos). Reuse a C# library such as **MacAddressVendorLookup** or import a JSON OUI file and match the first 3 bytes of the MAC.   [Github](https://github.com/PingmanTools/MacAddressVendorLookup)  [Github](https://github.com/uxmansarwar/mac-address-vendor-database)
+- Use an OUI/vendor DB (Wireshark `manuf` or maintained JSON/CSV repos). Reuse a C# library such as **MacAddressVendorLookup** or import a JSON OUI file and match the first 3 bytes of the MAC.   [GitHub](https://github.com/PingmanTools/MacAddressVendorLookup)  [GitHub](https://github.com/uxmansarwar/mac-address-vendor-database)
 
 **C# sketch:**
 ```csharp
@@ -42,14 +42,14 @@ device.Vendor = vendor?.Organization ?? "Unknown";
 
 ## Mapping device → router/switch (practical recipe)
 - **Read local routing table** to find default gateway; correlate ARP entries to MACs seen.  
-- **Capture LLDP/CDP** frames (or use pktmon-based tools) to learn switch port and neighbor info when available.   [Github](https://github.com/gavc/clldp)  
+- **Capture LLDP/CDP** frames (or use pktmon-based tools) to learn switch port and neighbor info when available.   [GitHub](https://github.com/gavc/clldp)  
 - **If switches are managed**, query SNMP to read CAM tables and map MAC→port.  
 - **If you control the network**, enable port mirroring or deploy lightweight agents on each segment to centralize visibility.
 
 ---
 
 ## Open ports, services, and sniffer detection
-- **Integrate Nmap** for targeted scans (call nmap and parse XML with `NmapXmlParser` or use a .NET wrapper). Use light scans (top ports) to avoid disruption.   [Libraries.io](https://libraries.io/nuget/NmapXmlParser)  [Github](https://github.com/coj337/Nmap.NET)  
+- **Integrate Nmap** for targeted scans (call nmap and parse XML with `NmapXmlParser` or use a .NET wrapper). Use light scans (top ports) to avoid disruption.   [Libraries.io](https://libraries.io/nuget/NmapXmlParser)  [GitHub](https://github.com/coj337/Nmap.NET)  
 - **Detect sniffers/promiscuous NICs**: run Nmap’s `sniffer-detect` NSE or implement ARP‑based promiscuous tests; monitor ARP anomalies and unexpected ARP replies.   [InfosecMatter](https://www.infosecmatter.com/nmap-nse-library/?nse=sniffer-detect)  [secra.es](https://secra.es/en/blog/what-is-a-sniffer-network-traffic-analysis)
 
 ---
