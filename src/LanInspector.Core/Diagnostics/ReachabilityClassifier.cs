@@ -40,6 +40,16 @@ public sealed class ReachabilityClassifier
                 routeDecision.RouteSummary);
         }
 
+        if (routeDecision is not null && !string.IsNullOrWhiteSpace(routeDecision.RouteSummary))
+        {
+            var reachability = hasOpenTcpPort ? ReachabilityKind.ReachableTcpOnly : ReachabilityKind.RouteExistsServiceUnavailable;
+            return new DeviceNetworkClassification(
+                InferSegment(address),
+                reachability,
+                profile.DefaultGateway?.ToString() ?? string.Empty,
+                routeDecision.RouteSummary);
+        }
+
         if (hasOpenTcpPort)
         {
             return new DeviceNetworkClassification(

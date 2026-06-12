@@ -6,7 +6,7 @@ namespace LanInspector.UI.Services;
 public sealed class WindowsTerminalLauncher
 {
     private static readonly Regex SshCommandPattern = new(
-        @"^ssh(?:\s+-p\s+(?<port>\d{1,5}))?\s+(?<user>[A-Za-z0-9._-]+)@(?<host>[A-Za-z0-9.:-]+)$",
+        @"^ssh(?:\s+-p\s+(?<port>\d{1,5}))?\s+(?:(?<user>[A-Za-z0-9._-]+)@)?(?<host>[A-Za-z0-9.:-]+)$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
     public bool OpenSsh(string command)
@@ -36,8 +36,20 @@ public sealed class WindowsTerminalLauncher
         var user = match.Groups["user"].Value;
         var host = match.Groups["host"].Value;
         var port = match.Groups["port"].Value;
-        arguments = string.IsNullOrWhiteSpace(port) ? $"ssh {user}@{host}" : $"ssh -p {port} {user}@{host}";
+
+        if (!IsValidPort(port))
+        {
+            return false;
+        }
+
+        var target = string.IsNullOrWhiteSpace(user) ? host : $"{user}@{host}";
+        arguments = string.IsNullOrWhiteSpace(port) ? $"ssh {target}" : $"ssh -p {port} {target}";
         return true;
+    }
+
+    private static bool IsValidPort(string port)
+    {
+        return string.IsNullOrWhiteSpace(port) || (int.TryParse(port, out var parsed) && parsed is >= 1 and <= 65535);
     }
 
     private static bool TryStart(string fileName, string arguments)
