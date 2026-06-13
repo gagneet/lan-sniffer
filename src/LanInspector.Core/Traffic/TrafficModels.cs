@@ -11,9 +11,16 @@ public sealed record TrafficFlowKey(
 {
     public TrafficFlowKey Normalised()
     {
-        // always put lower IP first so A->B and B->A merge
-        if (SourceIp.ToString().CompareTo(DestIp.ToString()) > 0)
-            return new TrafficFlowKey(DestIp, SourceIp, DestPort, SourcePort, Protocol);
+        // Compare address bytes so numeric ordering is correct (avoids lexicographic string pitfall).
+        var srcBytes = SourceIp.GetAddressBytes();
+        var dstBytes = DestIp.GetAddressBytes();
+        for (var i = 0; i < Math.Min(srcBytes.Length, dstBytes.Length); i++)
+        {
+            if (srcBytes[i] > dstBytes[i])
+                return new TrafficFlowKey(DestIp, SourceIp, DestPort, SourcePort, Protocol);
+            if (srcBytes[i] < dstBytes[i])
+                break;
+        }
         return this;
     }
 }

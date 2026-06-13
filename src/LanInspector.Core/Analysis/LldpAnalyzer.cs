@@ -92,7 +92,8 @@ public sealed class LldpAnalyzer : IPacketAnalyzer
             return;
 
         var neighbour = new LldpNeighbour(chassisId, portId, systemName, managementAddress, DateTime.UtcNow);
-        _neighbours[chassisId] = neighbour;
+        // Use composite key so a multi-port switch doesn't clobber earlier port entries.
+        _neighbours[$"{chassisId}|{portId}"] = neighbour;
         NeighbourDiscovered?.Invoke(this, neighbour);
     }
 

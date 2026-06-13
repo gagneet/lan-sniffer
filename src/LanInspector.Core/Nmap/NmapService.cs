@@ -80,7 +80,9 @@ public sealed class NmapService : INmapService
             var ports = new List<NmapPort>();
             foreach (var portEl in hostEl.Element("ports")?.Elements("port") ?? [])
             {
-                var portId = int.Parse(portEl.Attribute("portid")?.Value ?? "0");
+                if (!int.TryParse(portEl.Attribute("portid")?.Value, out var portId))
+                    continue;
+
                 var proto = portEl.Attribute("protocol")?.Value ?? "tcp";
                 var state = portEl.Element("state")?.Attribute("state")?.Value ?? "unknown";
                 var service = portEl.Element("service")?.Attribute("name")?.Value ?? "";
