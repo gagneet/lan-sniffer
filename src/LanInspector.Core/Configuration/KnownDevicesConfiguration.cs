@@ -75,6 +75,8 @@ public sealed class KnownDeviceDefinition
 
     public List<string> KnownSubnets { get; init; } = [];
 
+    public List<string> KnownTailscaleNames { get; init; } = [];
+
     public string? ExpectedVendor { get; init; }
 
     public KnownDeviceSshOptions? Ssh { get; init; }

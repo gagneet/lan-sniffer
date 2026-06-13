@@ -9,7 +9,7 @@ using LanInspector.Core.Identity;
 using LanInspector.Core.Model;
 using LanInspector.Core.Network;
 using LanInspector.Core.Scanning;
-using LanInspector.UI.Services;
+using LanInspector.Platform.Windows;
 using LanInspector.UI.ViewModels;
 using LanInspector.UI.Views;
 

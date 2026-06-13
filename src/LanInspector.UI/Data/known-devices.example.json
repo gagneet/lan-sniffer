@@ -8,6 +8,10 @@
         "192.168.0.148",
         "192.168.87.243"
       ],
+      "knownTailscaleNames": [
+        "home-server",
+        "homeserver"
+      ],
       "ssh": {
         "enabled": true,
         "user": "your-ssh-user",

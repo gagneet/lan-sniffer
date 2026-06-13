@@ -14,35 +14,171 @@ It helps answer practical home-network questions such as:
 
 ## Projects
 
-- `LanInspector.Core`: packet capture, network models, discovery, analyzers, topology models, remote-access logic and plugin contracts.
-- `LanInspector.Platform.Windows`: Windows route diagnostics, terminal launching and capture prerequisite checks.
-- `LanInspector.Platform.Linux`: Linux route diagnostics, terminal launching and capture prerequisite checks.
-- `LanInspector.Platform.MacOS`: macOS route diagnostics, terminal launching and capture prerequisite checks.
-- `LanInspector.Cli`: cross-platform command-line interface.
-- `LanInspector.UI`: Windows WPF shell and MVVM view models.
+| Project | Description |
+|---|---|
+| `LanInspector.Core` | Platform-neutral models, analyzers, SSH command generation, Tailscale integration, route diagnosis, known-device config. |
+| `LanInspector.Platform.Windows` | Windows route diagnostics (`Find-NetRoute`, `tracert`), Windows Terminal / PowerShell launcher, Npcap detection. |
+| `LanInspector.Platform.Linux` | Linux route diagnostics (`ip route`, `tracepath`, `traceroute`), terminal launcher, libpcap / capability checks. |
+| `LanInspector.Platform.MacOS` | macOS route diagnostics (`route -n get`, `traceroute`), BPF capture checks. |
+| `LanInspector.Cli` | Cross-platform CLI executable (`laninspector`). |
+| `LanInspector.UI` | Windows WPF desktop application. |
+| `LanInspector.Tests` | Unit tests for Core logic. |
 
-## Project Settings
+## CLI Usage
 
-- Core target framework: `net8.0`
-- UI target framework: `net8.0-windows`
-- WPF: enabled with `<UseWPF>true</UseWPF>`
-- Cross-OS restore/build support: `<EnableWindowsTargeting>true</EnableWindowsTargeting>`
-- Nullable reference types: enabled in `Directory.Build.props`
-- Implicit usings: enabled in `Directory.Build.props`
+```bash
+laninspector status                     # Network summary and Tailscale state
+laninspector interfaces                 # List active network interfaces
+laninspector known                      # List known devices from config
+laninspector check home-server          # Check reachability of a known device
+laninspector check-ip 192.168.87.243 --port 22
+laninspector route 192.168.87.243       # Route to IP
+laninspector trace 192.168.87.243       # Traceroute with route diagnosis
+laninspector ssh home-server --print    # Print SSH command
+laninspector ssh home-server --open     # Open SSH in terminal
+laninspector tailscale status           # Tailscale peer list
+laninspector tailscale routes           # Subnet route command suggestions
+laninspector recommend home-server      # Connection recommendations
+laninspector capture-prereqs            # Check packet capture prerequisites
+```
+
+Route diagnostics, Tailscale, and SSH command generation all work without packet capture privileges.
+
+## Remote Access Manager
+
+The `recommend` command analyses your known devices and the current network to suggest the best connection method:
+
+1. **Direct LAN IP** — if SSH port is reachable from the current machine.
+2. **Tailscale IP / hostname** — if the device is found in your Tailscale tailnet.
+3. **Subnet route guidance** — if the route exits via CGNAT (`100.64.0.0/10`), the app warns you and shows the `tailscale up --advertise-routes` command to run on a Linux server.
+
+## Tailscale Integration
+
+Tailscale is detected via `tailscale status --json`. The CLI shows:
+
+- `Not installed` / `Installed but not connected` / `Connected`
+- Peer list with online/offline status
+- Local Tailscale IP
+- Which known devices are visible in the tailnet
+
+No Tailscale API key is required. The integration reads local CLI output only.
+
+## SSH Actions
+
+Core generates SSH commands. Platform launchers open a terminal:
+
+- **Windows**: Windows Terminal (`wt.exe`) or PowerShell (`powershell.exe -NoExit`)
+- **Linux**: `x-terminal-emulator`, `gnome-terminal`, `konsole`, or `xterm`
+- **macOS**: `open -a Terminal` (command printed to stdout)
+
+No SSH passwords are stored. Authentication uses your local SSH keys, `ssh-agent`, or Windows OpenSSH.
+
+## Known Device Config
+
+Create `known-devices.json` in the current directory, `~/.config/laninspector/`, or the executable directory:
+
+```json
+{
+  "knownDevices": [
+    {
+      "id": "home-server",
+      "displayName": "Home Server",
+      "deviceType": "Server",
+      "knownIps": ["192.168.0.148", "192.168.87.243"],
+      "knownTailscaleNames": ["home-server", "homeserver"],
+      "ssh": {
+        "enabled": true,
+        "user": "your-username",
+        "port": 22
+      },
+      "tags": ["critical", "server"]
+    }
+  ]
+}
+```
+
+Override defaults without modifying the shipped file by creating `known-devices.local.json` next to `known-devices.json`.
+
+## Capture Prerequisites
+
+Packet capture requires a native driver. Route and SSH features work without it.
+
+| Platform | Requirement |
+|---|---|
+| Windows | Install [Npcap](https://npcap.com/) |
+| Linux | `sudo apt-get install libpcap-dev` and either run as root or `sudo setcap cap_net_raw,cap_net_admin=eip ./laninspector` |
+| macOS | Run with `sudo` or adjust BPF device permissions |
+
+Check prerequisites with: `laninspector capture-prereqs`
+
+## Building
+
+```bash
+dotnet build LanInspector.sln -c Release
+dotnet test tests/LanInspector.Tests/LanInspector.Tests.csproj
+```
+
+The WPF project (`LanInspector.UI`) requires Windows or the `EnableWindowsTargeting` build property. The CLI and Core build on any platform.
+
+## Publishing
+
+### Windows WPF
+
+```powershell
+.\scripts\publish-windows.ps1
+```
+
+Output: `artifacts\LanInspector-win-x64` (Npcap must be installed separately on the target machine.)
+
+### CLI (all targets)
+
+```powershell
+.\scripts\publish-cli.ps1
+```
+
+or on Linux/macOS:
+
+```bash
+./scripts/publish-cli.sh
+```
+
+Targets: `win-x64`, `linux-x64`, `osx-x64`, `osx-arm64`. Artifacts written to `artifacts/`.
+
+## Security and Privacy
+
+- No router admin passwords are stored.
+- No SSH passwords are stored.
+- Authentication uses normal OpenSSH, SSH keys, `ssh-agent`, or Windows OpenSSH.
+- Tailscale is the recommended secure remote access layer for cross-network connectivity.
+- Router configuration guidance is shown as manual instructions only — the app never logs into routers automatically.
+- Use only on networks you own or are authorised to inspect.
+- Active scans are user-triggered.
+- PCAP/PCAPNG files can contain sensitive metadata and payloads. Treat them as private.
 
 ## NuGet Packages
 
-Current core packages include:
+Current packages:
 
-- `SharpPcap`: packet capture provider.
-- `PacketDotNet`: packet parsing and protocol extraction.
-- `CommunityToolkit.Mvvm`: ViewModel base classes and relay commands.
+- `SharpPcap` `6.3.1` — packet capture
+- `PacketDotNet` `1.4.8` — packet parsing
+- `CommunityToolkit.Mvvm` `8.4.2` — WPF MVVM
+- `xunit` `2.9.3` — unit tests
 
-Planned/optional next-phase packages may include:
+Planned next-phase packages:
 
-- `LiveChartsCore` or `OxyPlot`: traffic charts.
-- `Lextm.SharpSnmpLib`: SNMP support.
-- Additional JSON/XML parsing packages only if required.
+- `LiveChartsCore` or `OxyPlot` — traffic charts
+- `Lextm.SharpSnmpLib` — SNMP support
+
+## Cross-Platform Status
+
+| Feature | Windows | Linux | macOS |
+|---|---|---|---|
+| Route diagnostics | `Find-NetRoute` + `tracert` | `ip route` + `tracepath` | `route -n get` + `traceroute` |
+| Tailscale status | `tailscale.exe` | `tailscale` | `tailscale` |
+| SSH command generation | Yes | Yes | Yes |
+| Terminal launcher | Windows Terminal / PowerShell | gnome-terminal / konsole / xterm | Terminal.app |
+| Packet capture | Npcap | libpcap + cap_net_raw | libpcap / BPF |
+| WPF UI | Yes | No (future Avalonia phase) | No (future Avalonia phase) |
 
 ## Current Capabilities
 
@@ -53,20 +189,22 @@ Planned/optional next-phase packages may include:
 - Reverse DNS fallback for devices that have an IP but no captured hostname yet.
 - Opt-in common TCP port scan from the selected device row.
 - Route-aware device classification with local segment, gateway and route summary fields.
-- Seeded known critical devices with SSH command actions for quick connection checks.
-- Cross-platform platform abstraction work for Windows, Linux and macOS service implementations.
-- CLI support for status, interfaces, known devices, route checks, trace checks, SSH command generation, Tailscale status and capture prerequisite checks.
-- Tailscale parsing/recommendation groundwork for remote access and subnet-router guidance.
+- Known critical devices with SSH command actions for quick connection checks.
+- Cross-platform platform abstraction for Windows, Linux and macOS service implementations.
+- CLI for status, interfaces, known devices, route checks, trace, SSH command generation, Tailscale status, remote access recommendations, and capture prerequisite checks.
+- Tailscale parsing and recommendation engine for remote access and subnet-router guidance.
+- RFC1918 / CGNAT route misconfiguration detection (e.g. Eero routing 192.168.87.x upstream via 100.64.x.x).
 
 ## Next Phase Roadmap
 
 The next major phase is documented in:
 
 - [`docs/next-phase-topology-traffic-dns-integrations.md`](docs/next-phase-topology-traffic-dns-integrations.md)
-- [`docs/user-guide.md`](docs/user-guide.md)
+- [`docs/next-phase-cross-platform-cli-remote-access.md`](docs/next-phase-cross-platform-cli-remote-access.md)
 
 Planned next-phase capabilities:
 
+- Avalonia cross-platform GUI (Linux / macOS desktop).
 - Topology snapshot with confidence and evidence.
 - LAN/NAT visibility explanation engine.
 - Traffic-flow aggregation and charts.
@@ -74,41 +212,8 @@ Planned next-phase capabilities:
 - Optional Wireshark/TShark integration for capture export and deep packet summaries.
 - Optional Pi-hole/AdGuard Home integration for DNS visibility.
 - SNMP and passive LLDP topology evidence foundation.
-- CLI commands for topology, visibility, traffic, Nmap, DNS, Wireshark/TShark and SNMP/LLDP.
-
-## Runtime Notes
-
-Packet capture normally requires a native capture driver or OS capture permissions.
-
-### Windows
-
-- Install Npcap for packet capture.
-- Optional: install Nmap for active scans.
-- Optional: install Wireshark/TShark for deep packet analysis.
-- Optional: install Tailscale for subnet-independent local/remote SSH.
-
-### Linux
-
-- Install libpcap.
-- Run with capture privileges or appropriate capabilities.
-- Optional: install Nmap, TShark and Tailscale.
-
-### macOS
-
-- Use libpcap/BPF-compatible capture permissions.
-- Optional: install Nmap, Wireshark/TShark and Tailscale.
-
-The default capture filter is:
-
-```text
-ip or arp or udp port 53 or udp port 5353 or udp port 67 or udp port 68
-```
-
-ARP visibility is limited to the local layer-2 segment. Routed networks still need active checks such as ping, TCP connect, route inspection and traceroute.
 
 ## Example Network Scenario
-
-A real-world validation scenario:
 
 ```text
 Origin NBN / Internet
@@ -130,83 +235,7 @@ Client on Optus 192.168.0.x:
   Trace goes to 192.168.0.1 then 192.168.87.243.
 ```
 
-LanInspector should explain this in plain English: the Eero route does not know how to reach the Google Nest subnet, while the Optus route currently does.
-
-## CLI Quick Start
-
-Typical commands:
-
-```bash
-laninspector status
-laninspector interfaces
-laninspector known
-laninspector check home-server
-laninspector check-ip 192.168.87.243 --port 22
-laninspector route 192.168.87.243
-laninspector trace 192.168.87.243
-laninspector ssh home-server --print
-laninspector capture-prereqs
-```
-
-Planned next-phase commands:
-
-```bash
-laninspector visibility
-laninspector topology --mermaid
-laninspector traffic top
-laninspector nmap ports 192.168.87.243
-laninspector wireshark status
-laninspector dns summary
-laninspector snmp query 192.168.0.1 --community public
-```
-
-## Publishing
-
-### Windows UI
-
-```powershell
-.\scripts\publish-windows.ps1
-```
-
-The resulting self-contained Windows artifact is expected under:
-
-```text
-artifacts\LanInspector-win-x64
-```
-
-Npcap must still be installed separately on the target Windows machine for packet capture.
-
-### CLI
-
-```powershell
-.\scripts\publish-cli.ps1
-```
-
-or on Linux/macOS:
-
-```bash
-./scripts/publish-cli.sh
-```
-
-Expected targets:
-
-```text
-win-x64
-linux-x64
-osx-x64
-osx-arm64
-```
-
-## Security and Privacy
-
-- Use only on networks you own or are authorised to inspect.
-- Active scans are user-triggered.
-- Do not run aggressive Nmap/NSE scans by default.
-- Do not store router admin passwords.
-- Do not store SSH passwords.
-- Store DNS API tokens only in local user configuration or OS-secure storage; never commit them to git.
-- Packet payload capture/export should require explicit user action.
-- PCAP/PCAPNG files can contain sensitive metadata and payloads. Treat them as private.
+LanInspector explains this in plain English: the Eero route does not know how to reach the Google Nest subnet, while the Optus route does.
 
 ## Documentation
 
