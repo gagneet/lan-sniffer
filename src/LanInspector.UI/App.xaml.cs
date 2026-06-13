@@ -5,9 +5,11 @@ using LanInspector.Core.Analysis;
 using LanInspector.Core.Capture;
 using LanInspector.Core.Configuration;
 using LanInspector.Core.Diagnostics;
+using LanInspector.Core.Dns;
 using LanInspector.Core.Identity;
 using LanInspector.Core.Model;
 using LanInspector.Core.Network;
+using LanInspector.Core.RemoteAccess;
 using LanInspector.Core.Scanning;
 using LanInspector.Platform.Windows;
 using LanInspector.UI.ViewModels;
@@ -41,6 +43,10 @@ public partial class App : Application
             Path.Combine(dataDirectory, "known-devices.local.json"));
         var localNetworkProvider = new LocalNetworkProfileProvider();
 
+        var tailscale = new TailscaleCliService();
+        var dnsConfig = DnsIntegrationsConfigLoader.Load();
+        var dnsService = DnsIntegrationsConfigLoader.CreateService(dnsConfig);
+
         var viewModel = new MainViewModel(
             _captureProvider,
             analyzers,
@@ -61,7 +67,10 @@ public partial class App : Application
                 }
 
                 Dispatcher.Invoke(action);
-            });
+            },
+            tailscale,
+            knownDevices,
+            dnsService);
 
         var mainWindow = new MainWindow(viewModel);
         mainWindow.Show();
