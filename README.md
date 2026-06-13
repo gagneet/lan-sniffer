@@ -27,19 +27,48 @@ It helps answer practical home-network questions such as:
 ## CLI Usage
 
 ```bash
-laninspector status                     # Network summary and Tailscale state
-laninspector interfaces                 # List active network interfaces
-laninspector known                      # List known devices from config
-laninspector check home-server          # Check reachability of a known device
+laninspector status                          # Network summary and Tailscale state
+laninspector interfaces                      # List active network interfaces
+laninspector known                           # List known devices from config
+laninspector check home-server               # Check reachability of a known device
 laninspector check-ip 192.168.87.243 --port 22
-laninspector route 192.168.87.243       # Route to IP
-laninspector trace 192.168.87.243       # Traceroute with route diagnosis
-laninspector ssh home-server --print    # Print SSH command
-laninspector ssh home-server --open     # Open SSH in terminal
-laninspector tailscale status           # Tailscale peer list
-laninspector tailscale routes           # Subnet route command suggestions
-laninspector recommend home-server      # Connection recommendations
-laninspector capture-prereqs            # Check packet capture prerequisites
+laninspector route 192.168.87.243            # Route to IP
+laninspector trace 192.168.87.243            # Traceroute with route diagnosis
+laninspector ssh home-server --print         # Print SSH command
+laninspector ssh home-server --open          # Open SSH in terminal
+laninspector tailscale status                # Tailscale peer list
+laninspector tailscale routes                # Subnet route command suggestions
+laninspector recommend home-server           # Connection recommendations
+laninspector capture-prereqs                 # Check packet capture prerequisites
+
+# Topology and visibility
+laninspector topology                        # Network topology snapshot
+laninspector topology --mermaid              # Mermaid diagram output
+laninspector topology --json                 # JSON output
+laninspector visibility                      # Explain visibility to all known devices
+laninspector visibility 192.168.87.243       # Explain visibility to a specific IP
+
+# Active scanning (optional, requires nmap)
+laninspector nmap status                     # Check if nmap is available
+laninspector nmap ping 192.168.87.0/24       # Ping sweep
+laninspector nmap ports 192.168.87.243       # TCP port scan (top 100)
+laninspector nmap services 192.168.87.243    # Service detection
+
+# Wireshark / TShark (optional)
+laninspector tshark status                   # Check if tshark/wireshark are available
+laninspector tshark summary capture.pcap     # Show packet summary from file
+laninspector tshark open capture.pcap        # Open in Wireshark
+laninspector pcap export eth0 30             # Capture 30 seconds from eth0
+
+# DNS filter provider (AdGuard Home or Pi-hole)
+laninspector dns status                      # Provider connection and blocking stats
+laninspector dns summary                     # Top clients, domains, blocked list
+laninspector dns queries 50                  # Recent DNS queries
+laninspector dns client 192.168.0.50         # Queries for a specific client
+
+# SNMP
+laninspector snmp 192.168.0.1                # Query device via SNMP v2c
+laninspector snmp 192.168.0.1 --community private
 ```
 
 Route diagnostics, Tailscale, and SSH command generation all work without packet capture privileges.
@@ -99,6 +128,33 @@ Create `known-devices.json` in the current directory, `~/.config/laninspector/`,
 
 Override defaults without modifying the shipped file by creating `known-devices.local.json` next to `known-devices.json`.
 
+## DNS Filter Integration
+
+Create `integrations.json` at:
+- **Windows**: `%APPDATA%\LanInspector\integrations.json`
+- **Linux/macOS**: `~/.config/laninspector/integrations.json`
+
+AdGuard Home example:
+```json
+{
+  "adGuardHome": {
+    "url": "http://192.168.0.1:3000",
+    "username": "admin",
+    "password": "your-password"
+  }
+}
+```
+
+Pi-hole example:
+```json
+{
+  "piHole": {
+    "url": "http://192.168.0.1",
+    "apiToken": "your-api-token"
+  }
+}
+```
+
 ## Capture Prerequisites
 
 Packet capture requires a native driver. Route and SSH features work without it.
@@ -157,17 +213,11 @@ Targets: `win-x64`, `linux-x64`, `osx-x64`, `osx-arm64`. Artifacts written to `a
 
 ## NuGet Packages
 
-Current packages:
-
 - `SharpPcap` `6.3.1` — packet capture
 - `PacketDotNet` `1.4.8` — packet parsing
 - `CommunityToolkit.Mvvm` `8.4.2` — WPF MVVM
+- `Lextm.SharpSnmpLib` `12.5.2` — SNMP v2c discovery
 - `xunit` `2.9.3` — unit tests
-
-Planned next-phase packages:
-
-- `LiveChartsCore` or `OxyPlot` — traffic charts
-- `Lextm.SharpSnmpLib` — SNMP support
 
 ## Cross-Platform Status
 
@@ -191,27 +241,25 @@ Planned next-phase packages:
 - Route-aware device classification with local segment, gateway and route summary fields.
 - Known critical devices with SSH command actions for quick connection checks.
 - Cross-platform platform abstraction for Windows, Linux and macOS service implementations.
-- CLI for status, interfaces, known devices, route checks, trace, SSH command generation, Tailscale status, remote access recommendations, and capture prerequisite checks.
+- CLI for status, interfaces, known devices, route checks, trace, SSH command generation, Tailscale status, remote access recommendations, capture prerequisite checks, topology, visibility, nmap, tshark, dns, snmp.
 - Tailscale parsing and recommendation engine for remote access and subnet-router guidance.
 - RFC1918 / CGNAT route misconfiguration detection (e.g. Eero routing 192.168.87.x upstream via 100.64.x.x).
+- **Topology snapshot** with node/edge model, confidence levels (Confirmed/High/Medium/Low/Unknown), evidence tracking, and Mermaid diagram export.
+- **Visibility explanation engine** — explains in plain English whether a machine can reach a target IP and why.
+- **Traffic flow aggregation** — live packets/sec, bytes/sec, per-flow tracking, time-series chart in WPF.
+- **Passive LLDP analyzer** — captures EtherType 0x88CC frames and extracts chassis ID, port ID, system name, management address.
+- **Nmap integration** — optional ping sweep, TCP connect scan, service detection. Parses XML output.
+- **TShark / Wireshark integration** — PCAP export, packet summary, open in Wireshark.
+- **AdGuard Home provider** — REST API integration for DNS filter status, top clients, blocked domains, recent queries.
+- **Pi-hole provider** — API integration for DNS filter status and query log.
+- **SNMP v2c discovery** — queries sysDescr, sysName, interface table, IP address table using SharpSnmpLib.
+- **WPF tabs** — Topology, Traffic, and DNS Filter tabs alongside the existing Devices tab.
 
 ## Next Phase Roadmap
 
-The next major phase is documented in:
-
-- [`docs/next-phase-topology-traffic-dns-integrations.md`](docs/next-phase-topology-traffic-dns-integrations.md)
-- [`docs/next-phase-cross-platform-cli-remote-access.md`](docs/next-phase-cross-platform-cli-remote-access.md)
-
-Planned next-phase capabilities:
-
 - Avalonia cross-platform GUI (Linux / macOS desktop).
-- Topology snapshot with confidence and evidence.
-- LAN/NAT visibility explanation engine.
-- Traffic-flow aggregation and charts.
-- Optional Nmap integration for active discovery.
-- Optional Wireshark/TShark integration for capture export and deep packet summaries.
-- Optional Pi-hole/AdGuard Home integration for DNS visibility.
-- SNMP and passive LLDP topology evidence foundation.
+- SNMP FDB table walk for switch port MAC mapping.
+- LLDP topology graph overlay (LLDP neighbours to topology nodes).
 
 ## Example Network Scenario
 

@@ -1,11 +1,18 @@
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Text.Json;
 using LanInspector.Core.Configuration;
 using LanInspector.Core.Diagnostics;
+using LanInspector.Core.Dns;
 using LanInspector.Core.Network;
+using LanInspector.Core.Nmap;
 using LanInspector.Core.RemoteAccess;
 using LanInspector.Core.Scanning;
+using LanInspector.Core.Snmp;
+using LanInspector.Core.Topology;
+using LanInspector.Core.Tshark;
+using LanInspector.Core.Visibility;
 
 namespace LanInspector.Cli;
 
@@ -75,6 +82,35 @@ internal static class CliApp
 
             case "capture-prereqs":
                 await RunCapturePrereqsAsync(capturePrereqs, ct);
+                break;
+
+            case "topology":
+                await RunTopologyAsync(rest, knownDevices, tailscale, ct);
+                break;
+
+            case "visibility":
+                await RunVisibilityAsync(rest, knownDevices, routeDiag, tailscale, ct);
+                break;
+
+            case "nmap":
+                await RunNmapAsync(rest, ct);
+                break;
+
+            case "wireshark":
+            case "tshark":
+                await RunTsharkAsync(rest, command, ct);
+                break;
+
+            case "pcap":
+                await RunPcapAsync(rest, ct);
+                break;
+
+            case "dns":
+                await RunDnsAsync(rest, ct);
+                break;
+
+            case "snmp":
+                await RunSnmpAsync(rest, ct);
                 break;
 
             default:
@@ -569,6 +605,394 @@ internal static class CliApp
         return "Unknown";
     }
 
+    private static async Task RunTopologyAsync(string[] args, IReadOnlyList<KnownDeviceDefinition> knownDevices, ITailscaleService tailscale, CancellationToken ct)
+    {
+        var outputJson = args.Contains("--json");
+        var outputMermaid = args.Contains("--mermaid");
+
+        var profile = new LocalNetworkProfileProvider().GetCurrentProfile();
+        var ts = await tailscale.GetStatusAsync(ct);
+        var config = new KnownDevicesConfiguration { KnownDevices = [.. knownDevices] };
+
+        var builder = new TopologyBuilder()
+            .AddLocalProfile(profile)
+            .AddKnownDevices(knownDevices, [])
+            .AddTailscaleStatus(ts);
+
+        var snapshot = builder.Build();
+
+        if (outputJson)
+        {
+            var opts = new JsonSerializerOptions { WriteIndented = true };
+            Console.WriteLine(JsonSerializer.Serialize(new
+            {
+                capturedAt = snapshot.CapturedAt,
+                nodes = snapshot.Nodes.Select(n => new { n.Id, n.DisplayName, type = n.Type.ToString(), confidence = n.Confidence.ToString(), ip = n.PrimaryIp?.ToString(), n.MacAddress, n.Evidence }),
+                edges = snapshot.Edges.Select(e => new { e.FromId, e.ToId, linkType = e.LinkType.ToString(), confidence = e.Confidence.ToString(), e.Label })
+            }, opts));
+            return;
+        }
+
+        if (outputMermaid)
+        {
+            Console.WriteLine(snapshot.ToMermaid());
+            return;
+        }
+
+        Console.WriteLine($"Network Topology Snapshot — {snapshot.CapturedAt:u}");
+        Console.WriteLine(new string('-', 50));
+        Console.WriteLine($"Nodes: {snapshot.Nodes.Count}  Edges: {snapshot.Edges.Count}");
+        Console.WriteLine();
+
+        foreach (var node in snapshot.Nodes)
+        {
+            var ip = node.PrimaryIp is not null ? $" [{node.PrimaryIp}]" : "";
+            var conf = $"({node.Confidence})";
+            Console.WriteLine($"  {node.Type,-14} {node.DisplayName,-30}{ip} {conf}");
+            foreach (var e in node.Evidence)
+                Console.WriteLine($"    + {e}");
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("Connections:");
+        foreach (var edge in snapshot.Edges)
+        {
+            var from = snapshot.FindNode(edge.FromId)?.DisplayName ?? edge.FromId;
+            var to = snapshot.FindNode(edge.ToId)?.DisplayName ?? edge.ToId;
+            Console.WriteLine($"  {from} --[{edge.LinkType}]--> {to}");
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("Tip: use --json or --mermaid for other output formats");
+    }
+
+    private static async Task RunVisibilityAsync(string[] args, IReadOnlyList<KnownDeviceDefinition> knownDevices, IRouteDiagnosticsService routeDiag, ITailscaleService tailscale, CancellationToken ct)
+    {
+        var config = new KnownDevicesConfiguration { KnownDevices = [.. knownDevices] };
+        var svc = new VisibilityExplanationService(routeDiag, new LocalNetworkProfileProvider(), config, tailscale);
+
+        var targetArg = args.FirstOrDefault(a => !a.StartsWith("--"));
+
+        if (targetArg is not null && IPAddress.TryParse(targetArg, out var targetIp))
+        {
+            var ex = await svc.ExplainAsync(targetIp, ct);
+            PrintVisibility(ex);
+            return;
+        }
+
+        Console.WriteLine("LanInspector Visibility — All Known Devices");
+        Console.WriteLine(new string('-', 50));
+
+        var results = await svc.ExplainAllKnownAsync(ct);
+        if (results.Count == 0)
+        {
+            Console.WriteLine("No known devices to check. Add them to known-devices.json.");
+            return;
+        }
+
+        foreach (var ex in results)
+            PrintVisibility(ex);
+    }
+
+    private static void PrintVisibility(VisibilityExplanation ex)
+    {
+        var indicator = ex.Result switch
+        {
+            VisibilityResult.Visible => "[VISIBLE]",
+            VisibilityResult.ProbablyVisible => "[PROBABLY VISIBLE]",
+            VisibilityResult.ProbablyNotVisible => "[PROBABLY NOT VISIBLE]",
+            VisibilityResult.NotVisible => "[NOT VISIBLE]",
+            _ => "[UNKNOWN]"
+        };
+
+        Console.WriteLine($"\n{indicator} {ex.TargetLabel} ({ex.Target})");
+        Console.WriteLine($"  {ex.Summary}");
+
+        if (ex.CanSee.Count > 0)
+        {
+            Console.WriteLine("  Can see:");
+            foreach (var s in ex.CanSee) Console.WriteLine($"    + {s}");
+        }
+
+        if (ex.CannotSee.Count > 0)
+        {
+            Console.WriteLine("  Cannot see:");
+            foreach (var s in ex.CannotSee) Console.WriteLine($"    - {s}");
+        }
+
+        if (ex.Why.Count > 0)
+        {
+            Console.WriteLine("  Why:");
+            foreach (var s in ex.Why) Console.WriteLine($"    * {s}");
+        }
+
+        if (ex.HowToImprove.Count > 0)
+        {
+            Console.WriteLine("  How to improve:");
+            foreach (var s in ex.HowToImprove) Console.WriteLine($"    > {s}");
+        }
+    }
+
+    private static async Task RunNmapAsync(string[] args, CancellationToken ct)
+    {
+        var nmap = new NmapService();
+
+        if (args.Length == 0 || args[0] == "status")
+        {
+            Console.WriteLine($"Nmap: {(nmap.IsAvailable ? $"Found at {nmap.NmapPath}" : "Not installed")}");
+            return;
+        }
+
+        var sub = args[0].ToLowerInvariant();
+        var target = args.Length > 1 ? args[1] : null;
+
+        if (target is null)
+        {
+            Console.Error.WriteLine($"Usage: laninspector nmap {sub} <target>");
+            return;
+        }
+
+        var mode = sub switch
+        {
+            "ping" => NmapScanMode.Ping,
+            "ports" => NmapScanMode.TcpConnect,
+            "services" => NmapScanMode.ServiceDetect,
+            _ => NmapScanMode.Ping
+        };
+
+        Console.WriteLine($"Running nmap {mode} scan on {target}...");
+
+        using var longCt = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        longCt.CancelAfter(TimeSpan.FromMinutes(10));
+
+        var result = await nmap.ScanAsync(target, mode, longCt.Token);
+
+        if (!result.Succeeded)
+        {
+            Console.Error.WriteLine($"Scan failed: {result.ErrorMessage}");
+            return;
+        }
+
+        Console.WriteLine($"Scan completed in {(result.FinishedAt - result.StartedAt).TotalSeconds:F1}s — {result.Hosts.Count} host(s)");
+        Console.WriteLine();
+
+        foreach (var host in result.Hosts)
+        {
+            Console.WriteLine($"  {host.Address}  {host.Hostname ?? ""}  [{host.Status}]");
+            foreach (var port in host.Ports.Where(p => p.State == "open"))
+                Console.WriteLine($"    {port.Number}/{port.Protocol,-4} {port.Service,-20} {port.Version ?? ""}");
+        }
+    }
+
+    private static async Task RunTsharkAsync(string[] args, string command, CancellationToken ct)
+    {
+        var svc = new TsharkService();
+
+        if (args.Length == 0 || args[0] == "status")
+        {
+            Console.WriteLine($"tshark:    {(svc.IsTsharkAvailable ? $"Found at {svc.TsharkPath}" : "Not installed")}");
+            Console.WriteLine($"Wireshark: {(svc.IsWiresharkAvailable ? $"Found at {svc.WiresharkPath}" : "Not installed")}");
+            return;
+        }
+
+        var sub = args[0].ToLowerInvariant();
+        var file = args.Length > 1 ? args[1] : null;
+
+        if ((sub == "summary" || sub == "json" || sub == "open") && file is null)
+        {
+            Console.Error.WriteLine($"Usage: laninspector tshark {sub} <pcap-file>");
+            return;
+        }
+
+        if (sub == "summary")
+        {
+            Console.WriteLine($"Reading {file}...");
+            var packets = await svc.ReadSummaryAsync(file!, ct);
+            Console.WriteLine($"  {packets.Count} packets");
+            foreach (var p in packets.Take(20))
+                Console.WriteLine($"  {p.Number,6} {p.TimestampSeconds,10:F3}  {p.Source,-20} -> {p.Destination,-20}  {p.Protocol,-10} {p.Length,5} {p.Info}");
+        }
+        else if (sub == "open")
+        {
+            var opened = await svc.OpenInWiresharkAsync(file!, ct);
+            Console.WriteLine(opened ? $"Opened {file} in Wireshark" : "Failed to open Wireshark");
+        }
+        else
+        {
+            Console.Error.WriteLine($"Unknown tshark subcommand: {sub}");
+            Console.Error.WriteLine("Usage: laninspector tshark status|summary <file>|open <file>");
+        }
+    }
+
+    private static async Task RunPcapAsync(string[] args, CancellationToken ct)
+    {
+        var svc = new TsharkService();
+
+        if (args.Length == 0 || args[0] != "export")
+        {
+            Console.Error.WriteLine("Usage: laninspector pcap export <device> <seconds> [<output.pcapng>]");
+            return;
+        }
+
+        if (args.Length < 3)
+        {
+            Console.Error.WriteLine("Usage: laninspector pcap export <device> <seconds> [<output.pcapng>]");
+            return;
+        }
+
+        var device = args[1];
+        if (!int.TryParse(args[2], out var seconds) || seconds < 1)
+        {
+            Console.Error.WriteLine("Duration must be a positive integer (seconds).");
+            return;
+        }
+
+        var output = args.Length > 3 ? args[3] : Path.Combine(Directory.GetCurrentDirectory(), $"capture_{DateTime.Now:yyyyMMdd_HHmmss}.pcapng");
+
+        Console.WriteLine($"Capturing {seconds}s from {device} → {output}...");
+        var result = await svc.ExportPcapngAsync(device, TimeSpan.FromSeconds(seconds), output, ct);
+
+        if (result.Succeeded)
+            Console.WriteLine($"Saved: {result.FilePath}");
+        else
+            Console.Error.WriteLine($"Export failed: {result.ErrorMessage}");
+    }
+
+    private static async Task RunDnsAsync(string[] args, CancellationToken ct)
+    {
+        var intConfig = DnsIntegrationsConfigLoader.Load();
+        var svc = DnsIntegrationsConfigLoader.CreateService(intConfig);
+
+        if (svc is null)
+        {
+            Console.WriteLine("No DNS filter provider configured.");
+            Console.WriteLine($"Create integrations.json at: {DnsIntegrationsConfigLoader.GetDefaultPath()}");
+            Console.WriteLine();
+            Console.WriteLine("Example (AdGuard Home):");
+            Console.WriteLine("  { \"adGuardHome\": { \"url\": \"http://192.168.0.1:3000\", \"username\": \"admin\", \"password\": \"...\" } }");
+            Console.WriteLine("Example (Pi-hole):");
+            Console.WriteLine("  { \"piHole\": { \"url\": \"http://192.168.0.1\", \"apiToken\": \"...\" } }");
+            return;
+        }
+
+        var sub = args.Length > 0 ? args[0].ToLowerInvariant() : "status";
+
+        switch (sub)
+        {
+            case "status":
+            {
+                var status = await svc.GetStatusAsync(ct);
+                Console.WriteLine($"DNS Filter: {status.ProviderName}");
+                Console.WriteLine($"  Connected:         {status.IsConnected}");
+                Console.WriteLine($"  Filtering enabled: {status.FilteringEnabled}");
+                Console.WriteLine($"  Blocked today:     {status.BlockedToday:N0} / {status.TotalToday:N0} ({status.BlockPercent:F1}%)");
+                if (status.ErrorMessage is not null)
+                    Console.WriteLine($"  Error: {status.ErrorMessage}");
+                break;
+            }
+
+            case "summary":
+            {
+                var summary = await svc.GetSummaryAsync(ct);
+                Console.WriteLine($"DNS Filter Summary: {summary.Status.ProviderName}");
+                Console.WriteLine($"  Blocked: {summary.Status.BlockedToday:N0} / {summary.Status.TotalToday:N0}");
+                Console.WriteLine();
+                Console.WriteLine("  Top clients:");
+                foreach (var c in summary.TopClients.Take(5))
+                    Console.WriteLine($"    {c.ClientIp,-20} {c.QueryCount:N0} queries");
+                Console.WriteLine();
+                Console.WriteLine("  Top domains:");
+                foreach (var d in summary.TopDomains.Take(10))
+                    Console.WriteLine($"    {d.Domain,-40} {d.HitCount,6:N0} {(d.IsBlocked ? "[BLOCKED]" : "")}");
+                break;
+            }
+
+            case "queries":
+            {
+                var count = args.Length > 1 && int.TryParse(args[1], out var n) ? n : 20;
+                var queries = await svc.GetRecentQueriesAsync(count, ct);
+                Console.WriteLine($"Recent DNS Queries ({queries.Count}):");
+                foreach (var q in queries)
+                {
+                    var blocked = q.WasBlocked ? " [BLOCKED]" : "";
+                    Console.WriteLine($"  {q.Timestamp:HH:mm:ss}  {q.ClientIp,-20} {q.Domain,-40}{blocked}");
+                }
+                break;
+            }
+
+            case "client":
+            {
+                var clientIp = args.Length > 1 ? args[1] : null;
+                if (clientIp is null) { Console.Error.WriteLine("Usage: laninspector dns client <ip>"); return; }
+                var queries = await svc.GetRecentQueriesAsync(500, ct);
+                var clientQueries = queries.Where(q => q.ClientIp == clientIp).ToList();
+                Console.WriteLine($"Queries from {clientIp}: {clientQueries.Count}");
+                foreach (var q in clientQueries)
+                {
+                    var blocked = q.WasBlocked ? " [BLOCKED]" : "";
+                    Console.WriteLine($"  {q.Timestamp:HH:mm:ss}  {q.Domain,-40}{blocked}");
+                }
+                break;
+            }
+
+            default:
+                Console.Error.WriteLine($"Unknown dns subcommand: {sub}");
+                Console.Error.WriteLine("Usage: laninspector dns status|summary|queries|client <ip>");
+                break;
+        }
+    }
+
+    private static async Task RunSnmpAsync(string[] args, CancellationToken ct)
+    {
+        if (args.Length == 0 || !IPAddress.TryParse(args[0], out var target))
+        {
+            Console.Error.WriteLine("Usage: laninspector snmp <ip> [--community <community>]");
+            return;
+        }
+
+        var communityIdx = Array.IndexOf(args, "--community");
+        var community = communityIdx >= 0 && communityIdx + 1 < args.Length ? args[communityIdx + 1] : "public";
+
+        Console.WriteLine($"SNMP query to {target} (community: {community})...");
+
+        var svc = new SnmpDiscoveryService();
+
+        using var snmpCt = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        snmpCt.CancelAfter(TimeSpan.FromSeconds(10));
+
+        var result = await svc.QueryAsync(target, community, snmpCt.Token);
+
+        if (!result.Succeeded)
+        {
+            Console.Error.WriteLine($"SNMP failed: {result.ErrorMessage}");
+            return;
+        }
+
+        var info = result.Info!;
+        Console.WriteLine($"  sysName:     {info.SysName ?? "(none)"}");
+        Console.WriteLine($"  sysDescr:    {info.SysDescr?.Split('\n').First() ?? "(none)"}");
+        Console.WriteLine($"  sysLocation: {info.SysLocation ?? "(none)"}");
+
+        if (info.Interfaces.Count > 0)
+        {
+            Console.WriteLine();
+            Console.WriteLine("  Interfaces:");
+            foreach (var iface in info.Interfaces.Take(10))
+            {
+                var speed = iface.SpeedBps.HasValue ? $"{iface.SpeedBps / 1_000_000}Mbps" : "";
+                Console.WriteLine($"    [{iface.Index}] {iface.Description,-30} {iface.OperStatus,-10} {speed}");
+            }
+        }
+
+        if (info.IpAddresses.Count > 0)
+        {
+            Console.WriteLine();
+            Console.WriteLine("  IP addresses:");
+            foreach (var ip in info.IpAddresses)
+                Console.WriteLine($"    {ip}");
+        }
+    }
+
     private static void PrintHelp()
     {
         Console.WriteLine("LanInspector CLI");
@@ -588,6 +1012,13 @@ internal static class CliApp
         Console.WriteLine("  tailscale routes           Subnet route command suggestions");
         Console.WriteLine("  recommend <id>             Connection recommendations for known device");
         Console.WriteLine("  capture-prereqs            Check packet capture prerequisites");
+        Console.WriteLine("  topology [--json|--mermaid] Show network topology snapshot");
+        Console.WriteLine("  visibility [<ip>]           Explain visibility to target or all known devices");
+        Console.WriteLine("  nmap status|ping|ports|services <target>   Run nmap scan");
+        Console.WriteLine("  tshark status|summary <file>|open <file>   tshark/Wireshark tools");
+        Console.WriteLine("  pcap export <device> <seconds> [<file>]    Capture PCAP via tshark");
+        Console.WriteLine("  dns status|summary|queries|client <ip>     DNS filter provider");
+        Console.WriteLine("  snmp <ip> [--community <c>]                SNMP query");
         Console.WriteLine();
         Console.WriteLine("Known device config is loaded from (first match wins):");
         Console.WriteLine("  ./known-devices.json");

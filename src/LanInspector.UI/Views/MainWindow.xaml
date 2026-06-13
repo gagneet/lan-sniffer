@@ -147,86 +147,313 @@
                 </Border>
             </Grid>
 
-            <Grid Grid.Row="2">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="340" />
-                </Grid.ColumnDefinitions>
+            <TabControl Grid.Row="2" Background="Transparent" BorderThickness="0">
 
-                <Border Background="White" BorderBrush="#D5DEE7" BorderThickness="1" CornerRadius="6" Margin="0,0,12,0">
-                    <DataGrid ItemsSource="{Binding Devices}"
-                              SelectedItem="{Binding SelectedDevice}"
-                              AutoGenerateColumns="False"
-                              IsReadOnly="True"
-                              CanUserAddRows="False"
-                              CanUserDeleteRows="False"
-                              GridLinesVisibility="Horizontal"
-                              HeadersVisibility="Column"
-                              RowHeaderWidth="0"
-                              BorderThickness="0">
-                        <DataGrid.Columns>
-                            <DataGridTextColumn Header="Display name" Binding="{Binding DisplayName}" Width="180" />
-                            <DataGridTextColumn Header="IP addresses" Binding="{Binding IpAddresses}" Width="160" />
-                            <DataGridTextColumn Header="Segment" Binding="{Binding Segment}" Width="120" />
-                            <DataGridTextColumn Header="Reachability" Binding="{Binding Reachability}" Width="125" />
-                            <DataGridTextColumn Header="Gateway" Binding="{Binding Gateway}" Width="110" />
-                            <DataGridTextColumn Header="MAC address" Binding="{Binding MacAddress}" Width="140" />
-                            <DataGridTextColumn Header="Vendor" Binding="{Binding Vendor}" Width="160" />
-                            <DataGridTextColumn Header="Open ports" Binding="{Binding OpenPorts}" Width="150" />
-                            <DataGridTextColumn Header="Seen via" Binding="{Binding SeenVia}" Width="150" />
-                            <DataGridTextColumn Header="Last seen" Binding="{Binding LastSeenLocal}" Width="145" />
-                        </DataGrid.Columns>
-                    </DataGrid>
-                </Border>
+                <!-- Devices Tab -->
+                <TabItem Header="Devices">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="340" />
+                        </Grid.ColumnDefinitions>
 
-                <Grid Grid.Column="1">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="2*" />
-                        <RowDefinition Height="*" />
-                    </Grid.RowDefinitions>
+                        <Border Background="White" BorderBrush="#D5DEE7" BorderThickness="1" CornerRadius="6" Margin="0,6,12,0">
+                            <DataGrid ItemsSource="{Binding Devices}"
+                                      SelectedItem="{Binding SelectedDevice}"
+                                      AutoGenerateColumns="False"
+                                      IsReadOnly="True"
+                                      CanUserAddRows="False"
+                                      CanUserDeleteRows="False"
+                                      GridLinesVisibility="Horizontal"
+                                      HeadersVisibility="Column"
+                                      RowHeaderWidth="0"
+                                      BorderThickness="0">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Display name" Binding="{Binding DisplayName}" Width="180" />
+                                    <DataGridTextColumn Header="IP addresses" Binding="{Binding IpAddresses}" Width="160" />
+                                    <DataGridTextColumn Header="Segment" Binding="{Binding Segment}" Width="120" />
+                                    <DataGridTextColumn Header="Reachability" Binding="{Binding Reachability}" Width="125" />
+                                    <DataGridTextColumn Header="Gateway" Binding="{Binding Gateway}" Width="110" />
+                                    <DataGridTextColumn Header="MAC address" Binding="{Binding MacAddress}" Width="140" />
+                                    <DataGridTextColumn Header="Vendor" Binding="{Binding Vendor}" Width="160" />
+                                    <DataGridTextColumn Header="Open ports" Binding="{Binding OpenPorts}" Width="150" />
+                                    <DataGridTextColumn Header="Seen via" Binding="{Binding SeenVia}" Width="150" />
+                                    <DataGridTextColumn Header="Last seen" Binding="{Binding LastSeenLocal}" Width="145" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Border>
 
-                    <Border Background="White" BorderBrush="#D5DEE7" BorderThickness="1" CornerRadius="6" Padding="14" Margin="0,0,0,12">
-                        <StackPanel>
-                            <TextBlock Text="Device details" FontWeight="SemiBold" FontSize="15" Margin="0,0,0,12" />
-                            <TextBlock Text="{Binding SelectedDevice.DisplayName}" FontSize="18" FontWeight="SemiBold" />
-                            <TextBlock Text="{Binding SelectedDevice.IpAddresses}" Foreground="#405162" Margin="0,4,0,12" />
-                            <TextBlock Text="Identity" FontWeight="SemiBold" />
-                            <TextBlock Text="{Binding SelectedDevice.Vendor}" Foreground="#405162" Margin="0,4,0,8" />
-                            <TextBlock Text="Network path" FontWeight="SemiBold" />
-                            <TextBlock Text="{Binding SelectedDevice.RouteSummary}" TextWrapping="Wrap" Foreground="#405162" Margin="0,4,0,8" />
-                            <TextBlock Text="Services" FontWeight="SemiBold" />
-                            <TextBlock Text="{Binding SelectedDevice.OpenPorts}" TextWrapping="Wrap" Foreground="#405162" Margin="0,4,0,8" />
-                            <TextBlock Text="Evidence" FontWeight="SemiBold" />
-                            <TextBlock Text="{Binding SelectedDevice.SeenVia}" TextWrapping="Wrap" Foreground="#405162" Margin="0,4,0,12" />
-                            <WrapPanel>
-                                <Button Content="Refresh Route" Command="{Binding RefreshSelectedRouteCommand}" />
-                                <Button Content="Copy SSH" Command="{Binding CopySelectedSshCommandCommand}" />
-                                <Button Content="Open SSH" Command="{Binding OpenSelectedSshCommand}" />
-                            </WrapPanel>
-                            <TextBox Text="{Binding SelectedDevice.SshCommand}" IsReadOnly="True" Margin="0,10,0,0" />
-                        </StackPanel>
-                    </Border>
+                        <Grid Grid.Column="1" Margin="0,6,0,0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="2*" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
 
-                    <Border Grid.Row="1" Background="White" BorderBrush="#D5DEE7" BorderThickness="1" CornerRadius="6" Padding="12">
-                        <DockPanel>
-                            <TextBlock DockPanel.Dock="Top" Text="Run history" FontWeight="SemiBold" Margin="0,0,0,10" />
-                            <ListBox ItemsSource="{Binding RunHistory}" BorderThickness="0">
-                                <ListBox.ItemTemplate>
-                                    <DataTemplate>
-                                        <Border BorderBrush="#E3E8EE" BorderThickness="0,0,0,1" Padding="0,8">
-                                            <StackPanel>
-                                                <TextBlock Text="{Binding Summary}" FontWeight="SemiBold" />
-                                                <TextBlock Text="{Binding CapturedAtLocal}" Foreground="#5C6A78" Margin="0,3,0,0" />
-                                                <TextBlock Text="{Binding DevicePreview}" TextWrapping="Wrap" Foreground="#304050" Margin="0,6,0,0" />
-                                            </StackPanel>
-                                        </Border>
-                                    </DataTemplate>
-                                </ListBox.ItemTemplate>
-                            </ListBox>
-                        </DockPanel>
-                    </Border>
-                </Grid>
-            </Grid>
+                            <Border Background="White" BorderBrush="#D5DEE7" BorderThickness="1" CornerRadius="6" Padding="14" Margin="0,0,0,12">
+                                <StackPanel>
+                                    <TextBlock Text="Device details" FontWeight="SemiBold" FontSize="15" Margin="0,0,0,12" />
+                                    <TextBlock Text="{Binding SelectedDevice.DisplayName}" FontSize="18" FontWeight="SemiBold" />
+                                    <TextBlock Text="{Binding SelectedDevice.IpAddresses}" Foreground="#405162" Margin="0,4,0,12" />
+                                    <TextBlock Text="Identity" FontWeight="SemiBold" />
+                                    <TextBlock Text="{Binding SelectedDevice.Vendor}" Foreground="#405162" Margin="0,4,0,8" />
+                                    <TextBlock Text="Network path" FontWeight="SemiBold" />
+                                    <TextBlock Text="{Binding SelectedDevice.RouteSummary}" TextWrapping="Wrap" Foreground="#405162" Margin="0,4,0,8" />
+                                    <TextBlock Text="Services" FontWeight="SemiBold" />
+                                    <TextBlock Text="{Binding SelectedDevice.OpenPorts}" TextWrapping="Wrap" Foreground="#405162" Margin="0,4,0,8" />
+                                    <TextBlock Text="Evidence" FontWeight="SemiBold" />
+                                    <TextBlock Text="{Binding SelectedDevice.SeenVia}" TextWrapping="Wrap" Foreground="#405162" Margin="0,4,0,12" />
+                                    <WrapPanel>
+                                        <Button Content="Refresh Route" Command="{Binding RefreshSelectedRouteCommand}" />
+                                        <Button Content="Copy SSH" Command="{Binding CopySelectedSshCommandCommand}" />
+                                        <Button Content="Open SSH" Command="{Binding OpenSelectedSshCommand}" />
+                                    </WrapPanel>
+                                    <TextBox Text="{Binding SelectedDevice.SshCommand}" IsReadOnly="True" Margin="0,10,0,0" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Row="1" Background="White" BorderBrush="#D5DEE7" BorderThickness="1" CornerRadius="6" Padding="12">
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Top" Text="Run history" FontWeight="SemiBold" Margin="0,0,0,10" />
+                                    <ListBox ItemsSource="{Binding RunHistory}" BorderThickness="0">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border BorderBrush="#E3E8EE" BorderThickness="0,0,0,1" Padding="0,8">
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding Summary}" FontWeight="SemiBold" />
+                                                        <TextBlock Text="{Binding CapturedAtLocal}" Foreground="#5C6A78" Margin="0,3,0,0" />
+                                                        <TextBlock Text="{Binding DevicePreview}" TextWrapping="Wrap" Foreground="#304050" Margin="0,6,0,0" />
+                                                    </StackPanel>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </DockPanel>
+                            </Border>
+                        </Grid>
+                    </Grid>
+                </TabItem>
+
+                <!-- Topology Tab -->
+                <TabItem Header="Topology">
+                    <DockPanel DataContext="{Binding TopologyTab}" Margin="0,6,0,0">
+                        <Border DockPanel.Dock="Top" Background="White" BorderBrush="#D5DEE7" BorderThickness="1" CornerRadius="6" Padding="10" Margin="0,0,0,8">
+                            <DockPanel>
+                                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
+                                    <Button Content="Refresh" Command="{Binding RefreshCommand}" />
+                                    <Button Content="Copy Mermaid" Command="{Binding CopyMermaidCommand}" Margin="6,0,0,0" />
+                                </StackPanel>
+                                <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="#5B6875" />
+                            </DockPanel>
+                        </Border>
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="2*" />
+                                <ColumnDefinition Width="3*" />
+                            </Grid.ColumnDefinitions>
+
+                            <Border Background="White" BorderBrush="#D5DEE7" BorderThickness="1" CornerRadius="6" Margin="0,0,8,0">
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Top" Text="Nodes" FontWeight="SemiBold" Margin="10,10,10,6" />
+                                    <DataGrid ItemsSource="{Binding Nodes}"
+                                              AutoGenerateColumns="False"
+                                              IsReadOnly="True"
+                                              CanUserAddRows="False"
+                                              GridLinesVisibility="Horizontal"
+                                              HeadersVisibility="Column"
+                                              RowHeaderWidth="0"
+                                              BorderThickness="0">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="Name" Binding="{Binding DisplayName}" Width="160" />
+                                            <DataGridTextColumn Header="Type" Binding="{Binding Type}" Width="100" />
+                                            <DataGridTextColumn Header="Confidence" Binding="{Binding Confidence}" Width="100" />
+                                            <DataGridTextColumn Header="IP" Binding="{Binding Ip}" Width="130" />
+                                            <DataGridTextColumn Header="Evidence" Binding="{Binding Evidence}" Width="*" />
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                </DockPanel>
+                            </Border>
+
+                            <Border Grid.Column="1" Background="White" BorderBrush="#D5DEE7" BorderThickness="1" CornerRadius="6">
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Top" Text="Connections" FontWeight="SemiBold" Margin="10,10,10,6" />
+                                    <DataGrid ItemsSource="{Binding Edges}"
+                                              AutoGenerateColumns="False"
+                                              IsReadOnly="True"
+                                              CanUserAddRows="False"
+                                              GridLinesVisibility="Horizontal"
+                                              HeadersVisibility="Column"
+                                              RowHeaderWidth="0"
+                                              BorderThickness="0">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="From" Binding="{Binding From}" Width="160" />
+                                            <DataGridTextColumn Header="To" Binding="{Binding To}" Width="160" />
+                                            <DataGridTextColumn Header="Link" Binding="{Binding LinkType}" Width="100" />
+                                            <DataGridTextColumn Header="Confidence" Binding="{Binding Confidence}" Width="100" />
+                                            <DataGridTextColumn Header="Label" Binding="{Binding Label}" Width="*" />
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                </DockPanel>
+                            </Border>
+                        </Grid>
+                    </DockPanel>
+                </TabItem>
+
+                <!-- Traffic Tab -->
+                <TabItem Header="Traffic">
+                    <DockPanel DataContext="{Binding TrafficTab}" Margin="0,6,0,0">
+                        <Border DockPanel.Dock="Top" Background="White" BorderBrush="#D5DEE7" BorderThickness="1" CornerRadius="6" Padding="10" Margin="0,0,0,8">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Packets/s:" Margin="0,0,6,0" VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding PacketsPerSecond}" FontWeight="SemiBold" Margin="0,0,18,0" VerticalAlignment="Center" />
+                                <TextBlock Text="Throughput:" Margin="0,0,6,0" VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding BytesPerSecond}" FontWeight="SemiBold" Margin="0,0,18,0" VerticalAlignment="Center" />
+                                <TextBlock Text="Total packets:" Margin="0,0,6,0" VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding TotalPackets}" FontWeight="SemiBold" Margin="0,0,18,0" VerticalAlignment="Center" />
+                                <TextBlock Text="Total data:" Margin="0,0,6,0" VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding TotalBytes}" FontWeight="SemiBold" Margin="0,0,18,0" VerticalAlignment="Center" />
+                                <Button Content="Reset" Command="{Binding ResetTrafficCommand}" Margin="12,0,0,0" />
+                                <TextBlock Text="{Binding StatusText}" Foreground="#5B6875" Margin="12,0,0,0" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border DockPanel.Dock="Top" Background="White" BorderBrush="#D5DEE7" BorderThickness="1" CornerRadius="6" Padding="10" Margin="0,0,0,8" Height="100">
+                            <DockPanel>
+                                <TextBlock DockPanel.Dock="Top" Text="Throughput (last 60s)" FontWeight="SemiBold" Margin="0,0,0,6" />
+                                <ItemsControl ItemsSource="{Binding ChartBars}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <StackPanel Orientation="Horizontal" VerticalAlignment="Bottom" />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Width="6" Height="{Binding Height}" Background="#3A86D4" Margin="1,0" ToolTip="{Binding Tooltip}" VerticalAlignment="Bottom" />
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </DockPanel>
+                        </Border>
+
+                        <Border Background="White" BorderBrush="#D5DEE7" BorderThickness="1" CornerRadius="6">
+                            <DockPanel>
+                                <TextBlock DockPanel.Dock="Top" Text="Top Flows" FontWeight="SemiBold" Margin="10,10,10,6" />
+                                <DataGrid ItemsSource="{Binding TopFlows}"
+                                          AutoGenerateColumns="False"
+                                          IsReadOnly="True"
+                                          CanUserAddRows="False"
+                                          GridLinesVisibility="Horizontal"
+                                          HeadersVisibility="Column"
+                                          RowHeaderWidth="0"
+                                          BorderThickness="0">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="200" />
+                                        <DataGridTextColumn Header="Destination" Binding="{Binding Destination}" Width="200" />
+                                        <DataGridTextColumn Header="Protocol" Binding="{Binding Protocol}" Width="80" />
+                                        <DataGridTextColumn Header="Packets" Binding="{Binding Packets}" Width="80" />
+                                        <DataGridTextColumn Header="Bytes" Binding="{Binding Bytes}" Width="100" />
+                                        <DataGridTextColumn Header="Last seen" Binding="{Binding LastSeen}" Width="100" />
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </DockPanel>
+                        </Border>
+                    </DockPanel>
+                </TabItem>
+
+                <!-- DNS Tab -->
+                <TabItem Header="DNS Filter">
+                    <DockPanel DataContext="{Binding DnsTab}" Margin="0,6,0,0">
+                        <Border DockPanel.Dock="Top" Background="White" BorderBrush="#D5DEE7" BorderThickness="1" CornerRadius="6" Padding="10" Margin="0,0,0,8">
+                            <DockPanel>
+                                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
+                                    <TextBlock Text="{Binding ProviderName}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,12,0" />
+                                    <TextBlock Text="Filtering:" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                    <TextBlock Text="{Binding FilteringStatus}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,12,0" />
+                                    <TextBlock Text="Blocked:" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                    <TextBlock Text="{Binding BlockedToday}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,4,0" />
+                                    <TextBlock Text="/" VerticalAlignment="Center" Margin="0,0,4,0" />
+                                    <TextBlock Text="{Binding TotalToday}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,4,0" />
+                                    <TextBlock Text="(" VerticalAlignment="Center" />
+                                    <TextBlock Text="{Binding BlockPercent}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                    <TextBlock Text=")" VerticalAlignment="Center" Margin="0,0,12,0" />
+                                    <Button Content="Refresh" Command="{Binding RefreshCommand}" />
+                                </StackPanel>
+                                <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center" Foreground="#5B6875" Margin="12,0,0,0" HorizontalAlignment="Right" />
+                            </DockPanel>
+                        </Border>
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="200" />
+                                <ColumnDefinition Width="300" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <Border Background="White" BorderBrush="#D5DEE7" BorderThickness="1" CornerRadius="6" Margin="0,0,8,0">
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Top" Text="Top Clients" FontWeight="SemiBold" Margin="10,10,10,6" />
+                                    <DataGrid ItemsSource="{Binding TopClients}"
+                                              AutoGenerateColumns="False"
+                                              IsReadOnly="True"
+                                              CanUserAddRows="False"
+                                              GridLinesVisibility="Horizontal"
+                                              HeadersVisibility="Column"
+                                              RowHeaderWidth="0"
+                                              BorderThickness="0">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="Client IP" Binding="{Binding ClientIp}" Width="*" />
+                                            <DataGridTextColumn Header="Queries" Binding="{Binding QueryCount}" Width="70" />
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                </DockPanel>
+                            </Border>
+
+                            <Border Grid.Column="1" Background="White" BorderBrush="#D5DEE7" BorderThickness="1" CornerRadius="6" Margin="0,0,8,0">
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Top" Text="Top Domains" FontWeight="SemiBold" Margin="10,10,10,6" />
+                                    <DataGrid ItemsSource="{Binding TopDomains}"
+                                              AutoGenerateColumns="False"
+                                              IsReadOnly="True"
+                                              CanUserAddRows="False"
+                                              GridLinesVisibility="Horizontal"
+                                              HeadersVisibility="Column"
+                                              RowHeaderWidth="0"
+                                              BorderThickness="0">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="Domain" Binding="{Binding Domain}" Width="*" />
+                                            <DataGridTextColumn Header="Hits" Binding="{Binding HitCount}" Width="55" />
+                                            <DataGridTextColumn Header="" Binding="{Binding Blocked}" Width="65" />
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                </DockPanel>
+                            </Border>
+
+                            <Border Grid.Column="2" Background="White" BorderBrush="#D5DEE7" BorderThickness="1" CornerRadius="6">
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Top" Text="Recent Queries" FontWeight="SemiBold" Margin="10,10,10,6" />
+                                    <DataGrid ItemsSource="{Binding RecentQueries}"
+                                              AutoGenerateColumns="False"
+                                              IsReadOnly="True"
+                                              CanUserAddRows="False"
+                                              GridLinesVisibility="Horizontal"
+                                              HeadersVisibility="Column"
+                                              RowHeaderWidth="0"
+                                              BorderThickness="0">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="Time" Binding="{Binding Time}" Width="70" />
+                                            <DataGridTextColumn Header="Client" Binding="{Binding Client}" Width="120" />
+                                            <DataGridTextColumn Header="Domain" Binding="{Binding Domain}" Width="*" />
+                                            <DataGridTextColumn Header="Type" Binding="{Binding QueryType}" Width="50" />
+                                            <DataGridTextColumn Header="" Binding="{Binding Blocked}" Width="65" />
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                </DockPanel>
+                            </Border>
+                        </Grid>
+                    </DockPanel>
+                </TabItem>
+
+            </TabControl>
         </Grid>
     </DockPanel>
 </Window>

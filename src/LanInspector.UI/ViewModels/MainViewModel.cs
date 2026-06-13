@@ -8,11 +8,13 @@ using LanInspector.Core.Analysis;
 using LanInspector.Core.Capture;
 using LanInspector.Core.Configuration;
 using LanInspector.Core.Diagnostics;
+using LanInspector.Core.Dns;
 using LanInspector.Core.Identity;
 using LanInspector.Core.Model;
 using LanInspector.Core.Network;
-using LanInspector.Core.Scanning;
 using LanInspector.Core.RemoteAccess;
+using LanInspector.Core.Scanning;
+using LanInspector.Core.Traffic;
 
 namespace LanInspector.UI.ViewModels;
 
@@ -31,6 +33,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly ITerminalLauncher _terminalLauncher;
     private readonly Action _clearDeviceStore;
     private readonly Action<Action> _dispatchToUi;
+    private readonly TrafficFlowService _trafficFlowService = new();
+    private readonly TrafficFlowAnalyzer _trafficFlowAnalyzer;
+    private readonly LldpAnalyzer _lldpAnalyzer = new();
     private readonly HashSet<string> _reverseDnsAttempts = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _pendingRouteRefreshes = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _reverseDnsAttemptsLock = new();
@@ -52,7 +57,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         ReachabilityClassifier reachabilityClassifier,
         ITerminalLauncher terminalLauncher,
         Action clearDeviceStore,
-        Action<Action> dispatchToUi)
+        Action<Action> dispatchToUi,
+        ITailscaleService tailscale,
+        KnownDevicesConfiguration knownDevicesConfig,
+        IDnsFilterService? dnsFilterService = null)
     {
         _captureProvider = captureProvider;
         _analyzers = analyzers;
@@ -65,6 +73,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _terminalLauncher = terminalLauncher;
         _clearDeviceStore = clearDeviceStore;
         _dispatchToUi = dispatchToUi;
+        _trafficFlowAnalyzer = new TrafficFlowAnalyzer(_trafficFlowService);
+
+        TrafficTab = new TrafficTabViewModel(_trafficFlowService);
+        TopologyTab = new TopologyTabViewModel(new LocalNetworkProfileProvider(), tailscale, knownDevicesConfig);
+        DnsTab = new DnsTabViewModel(dnsFilterService);
 
         _captureProvider.PacketCaptured += OnPacketCaptured;
         foreach (var analyzer in _analyzers)
@@ -90,6 +103,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         RefreshInterfaces();
         _ = RefreshCriticalDevicesAsync();
     }
+
+    public TopologyTabViewModel TopologyTab { get; }
+    public TrafficTabViewModel TrafficTab { get; }
+    public DnsTabViewModel DnsTab { get; }
 
     public ObservableCollection<CaptureDeviceInfo> Interfaces { get; } = [];
 
@@ -440,6 +457,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _captureProvider.Dispose();
         _shutdownCancellation.Dispose();
         _routeDiagnosticsGate.Dispose();
+        TrafficTab.Dispose();
         _disposed = true;
     }
 
@@ -456,6 +474,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 Debug.WriteLine($"Analyzer {analyzer.GetType().Name} failed: {ex}");
             }
         }
+
+        try { _trafficFlowAnalyzer.Analyze(e.ParsedPacket); } catch { }
+        try { _lldpAnalyzer.Analyze(e.ParsedPacket); } catch { }
 
         _dispatchToUi(() => PacketCount++);
     }

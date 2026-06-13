@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using SystemDns = System.Net.Dns;
 
 namespace LanInspector.Core.Identity;
 
@@ -16,7 +17,7 @@ public sealed class HostnameResolver
 
         try
         {
-            var entry = await Dns.GetHostEntryAsync(address.ToString(), AddressFamily.Unspecified, cts.Token);
+            var entry = await SystemDns.GetHostEntryAsync(address.ToString(), AddressFamily.Unspecified, cts.Token);
             return string.IsNullOrWhiteSpace(entry.HostName) ? null : entry.HostName;
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested)
