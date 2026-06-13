@@ -48,16 +48,10 @@ public sealed partial class TrafficTabViewModel : ObservableObject, IDisposable
     public TrafficTabViewModel(ITrafficFlowService trafficService)
     {
         _trafficService = trafficService;
-        _trafficService.DataUpdated += OnDataUpdated;
 
         _refreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _refreshTimer.Tick += (_, _) => Refresh();
         _refreshTimer.Start();
-    }
-
-    private void OnDataUpdated(object? sender, EventArgs e)
-    {
-        // Timer does periodic refresh; event wakes it if needed
     }
 
     private void Refresh()
@@ -116,6 +110,5 @@ public sealed partial class TrafficTabViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         _refreshTimer.Stop();
-        _trafficService.DataUpdated -= OnDataUpdated;
     }
 }

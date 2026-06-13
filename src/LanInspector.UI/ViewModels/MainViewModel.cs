@@ -475,8 +475,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             }
         }
 
-        try { _trafficFlowAnalyzer.Analyze(e.ParsedPacket); } catch { }
-        try { _lldpAnalyzer.Analyze(e.ParsedPacket); } catch { }
+        try { _trafficFlowAnalyzer.Analyze(e.ParsedPacket); }
+        catch (Exception ex) { Debug.WriteLine($"Analyzer {nameof(TrafficFlowAnalyzer)} failed: {ex}"); }
+
+        try { _lldpAnalyzer.Analyze(e.ParsedPacket); }
+        catch (Exception ex) { Debug.WriteLine($"Analyzer {nameof(LldpAnalyzer)} failed: {ex}"); }
 
         _dispatchToUi(() => PacketCount++);
     }

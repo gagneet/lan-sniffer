@@ -422,7 +422,7 @@
                                         <DataGrid.Columns>
                                             <DataGridTextColumn Header="Domain" Binding="{Binding Domain}" Width="*" />
                                             <DataGridTextColumn Header="Hits" Binding="{Binding HitCount}" Width="55" />
-                                            <DataGridTextColumn Header="" Binding="{Binding Blocked}" Width="65" />
+                                            <DataGridTextColumn Header="Blocked" Binding="{Binding Blocked}" Width="65" />
                                         </DataGrid.Columns>
                                     </DataGrid>
                                 </DockPanel>
@@ -444,7 +444,7 @@
                                             <DataGridTextColumn Header="Client" Binding="{Binding Client}" Width="120" />
                                             <DataGridTextColumn Header="Domain" Binding="{Binding Domain}" Width="*" />
                                             <DataGridTextColumn Header="Type" Binding="{Binding QueryType}" Width="50" />
-                                            <DataGridTextColumn Header="" Binding="{Binding Blocked}" Width="65" />
+                                            <DataGridTextColumn Header="Blocked" Binding="{Binding Blocked}" Width="65" />
                                         </DataGrid.Columns>
                                     </DataGrid>
                                 </DockPanel>

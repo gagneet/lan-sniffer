@@ -612,7 +612,6 @@ internal static class CliApp
 
         var profile = new LocalNetworkProfileProvider().GetCurrentProfile();
         var ts = await tailscale.GetStatusAsync(ct);
-        var config = new KnownDevicesConfiguration { KnownDevices = [.. knownDevices] };
 
         var builder = new TopologyBuilder()
             .AddLocalProfile(profile)
@@ -798,9 +797,9 @@ internal static class CliApp
         var sub = args[0].ToLowerInvariant();
         var file = args.Length > 1 ? args[1] : null;
 
-        if ((sub == "summary" || sub == "json" || sub == "open") && file is null)
+        if ((sub == "summary" || sub == "open") && file is null)
         {
-            Console.Error.WriteLine($"Usage: laninspector tshark {sub} <pcap-file>");
+            Console.Error.WriteLine($"Usage: laninspector {command} {sub} <pcap-file>");
             return;
         }
 
@@ -819,8 +818,8 @@ internal static class CliApp
         }
         else
         {
-            Console.Error.WriteLine($"Unknown tshark subcommand: {sub}");
-            Console.Error.WriteLine("Usage: laninspector tshark status|summary <file>|open <file>");
+            Console.Error.WriteLine($"Unknown {command} subcommand: {sub}");
+            Console.Error.WriteLine($"Usage: laninspector {command} status|summary <file>|open <file>");
         }
     }
 
