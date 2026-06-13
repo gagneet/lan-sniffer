@@ -54,7 +54,7 @@ public partial class App : Application
             vendorLookup,
             new HostnameResolver(),
             new PortScanner(),
-            new WindowsPowerShellRouteDiagnosticsService(),
+            new WindowsRouteDiagnosticsService(),
             new ReachabilityClassifier(localNetworkProvider),
             new WindowsTerminalLauncher(),
             devices.Clear,
