@@ -40,7 +40,7 @@ public sealed class TopologyBuilderTests
     }
 
     [Fact]
-    public void AddLocalProfile_GatewayNode_HasConfirmedConfidence()
+    public void AddLocalProfile_GatewayNode_HasHighConfidence()
     {
         var profile = BuildProfile("192.168.1.100", "192.168.1.1");
         var snapshot = new TopologyBuilder().AddLocalProfile(profile).Build();
