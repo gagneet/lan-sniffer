@@ -1,0 +1,112 @@
+name: Build and Publish
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  pull_request:
+    branches: [master]
+
+jobs:
+  build-core-and-tests:
+    name: Core + Tests (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore LanInspector.sln
+
+      - name: Build Core
+        run: dotnet build src/LanInspector.Core/LanInspector.Core.csproj -c Release --no-restore
+
+      - name: Build Platform.Linux
+        run: dotnet build src/LanInspector.Platform.Linux/LanInspector.Platform.Linux.csproj -c Release --no-restore
+
+      - name: Build CLI
+        run: dotnet build src/LanInspector.Cli/LanInspector.Cli.csproj -c Release --no-restore
+
+      - name: Run Tests
+        run: dotnet test tests/LanInspector.Tests/LanInspector.Tests.csproj -c Release --no-restore --logger "console;verbosity=normal"
+
+  publish-wpf:
+    name: Publish WPF (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore LanInspector.sln
+
+      - name: Build solution
+        run: dotnet build LanInspector.sln -c Release --no-restore
+
+      - name: Run Tests
+        run: dotnet test tests/LanInspector.Tests/LanInspector.Tests.csproj -c Release --no-restore
+
+      - name: Publish WPF
+        run: |
+          dotnet publish src/LanInspector.UI/LanInspector.UI.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:EnableCompressionInSingleFile=true `
+            -p:PublishReadyToRun=true `
+            -o artifacts/LanInspector-win-x64
+
+      - name: Upload WPF artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LanInspector-win-x64
+          path: artifacts/LanInspector-win-x64/
+
+  publish-cli:
+    name: Publish CLI (${{ matrix.rid }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - rid: win-x64
+            os: windows-latest
+          - rid: linux-x64
+            os: ubuntu-latest
+          - rid: osx-x64
+            os: macos-latest
+          - rid: osx-arm64
+            os: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore src/LanInspector.Cli/LanInspector.Cli.csproj
+
+      - name: Publish CLI
+        run: |
+          dotnet publish src/LanInspector.Cli/LanInspector.Cli.csproj \
+            -c Release \
+            -r ${{ matrix.rid }} \
+            --self-contained true \
+            -p:PublishSingleFile=true \
+            -o artifacts/laninspector-cli-${{ matrix.rid }}
+        shell: bash
+
+      - name: Upload CLI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: laninspector-cli-${{ matrix.rid }}
+          path: artifacts/laninspector-cli-${{ matrix.rid }}/

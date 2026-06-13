@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\LanInspector.Core\LanInspector.Core.csproj" />
+    <ProjectReference Include="..\LanInspector.Platform.Windows\LanInspector.Platform.Windows.csproj" />
   </ItemGroup>
 
   <ItemGroup>

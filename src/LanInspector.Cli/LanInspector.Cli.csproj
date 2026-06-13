@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>laninspector</AssemblyName>
+    <RootNamespace>LanInspector.Cli</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\LanInspector.Core\LanInspector.Core.csproj" />
+    <ProjectReference Include="..\LanInspector.Platform.Windows\LanInspector.Platform.Windows.csproj" />
+    <ProjectReference Include="..\LanInspector.Platform.Linux\LanInspector.Platform.Linux.csproj" />
+    <ProjectReference Include="..\LanInspector.Platform.MacOS\LanInspector.Platform.MacOS.csproj" />
+  </ItemGroup>
+</Project>

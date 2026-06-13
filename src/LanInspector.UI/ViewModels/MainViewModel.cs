@@ -12,7 +12,7 @@ using LanInspector.Core.Identity;
 using LanInspector.Core.Model;
 using LanInspector.Core.Network;
 using LanInspector.Core.Scanning;
-using LanInspector.UI.Services;
+using LanInspector.Core.RemoteAccess;
 
 namespace LanInspector.UI.ViewModels;
 
@@ -28,7 +28,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly PortScanner _portScanner;
     private readonly IRouteDiagnosticsService _routeDiagnostics;
     private readonly ReachabilityClassifier _reachabilityClassifier;
-    private readonly WindowsTerminalLauncher _terminalLauncher;
+    private readonly ITerminalLauncher _terminalLauncher;
     private readonly Action _clearDeviceStore;
     private readonly Action<Action> _dispatchToUi;
     private readonly HashSet<string> _reverseDnsAttempts = new(StringComparer.OrdinalIgnoreCase);
@@ -50,7 +50,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         PortScanner portScanner,
         IRouteDiagnosticsService routeDiagnostics,
         ReachabilityClassifier reachabilityClassifier,
-        WindowsTerminalLauncher terminalLauncher,
+        ITerminalLauncher terminalLauncher,
         Action clearDeviceStore,
         Action<Action> dispatchToUi)
     {
@@ -400,9 +400,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private bool CanCopySelectedSshCommand() => !string.IsNullOrWhiteSpace(SelectedDevice?.SshCommand);
 
     [RelayCommand(CanExecute = nameof(CanOpenSelectedSsh))]
-    private void OpenSelectedSsh()
+    private async Task OpenSelectedSshAsync()
     {
-        OpenCommand(SelectedDevice?.SshCommand);
+        await OpenCommandAsync(SelectedDevice?.SshCommand);
     }
 
     private bool CanOpenSelectedSsh() => !string.IsNullOrWhiteSpace(SelectedDevice?.SshCommand);
@@ -416,9 +416,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private bool CanCopyCriticalSshCommand() => !string.IsNullOrWhiteSpace(SelectedCriticalDevice?.SshCommand);
 
     [RelayCommand(CanExecute = nameof(CanOpenCriticalSsh))]
-    private void OpenCriticalSsh()
+    private async Task OpenCriticalSshAsync()
     {
-        OpenCommand(SelectedCriticalDevice?.SshCommand);
+        await OpenCommandAsync(SelectedCriticalDevice?.SshCommand);
     }
 
     private bool CanOpenCriticalSsh() => !string.IsNullOrWhiteSpace(SelectedCriticalDevice?.SshCommand);
@@ -709,15 +709,16 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         StatusText = $"Copied: {command}";
     }
 
-    private void OpenCommand(string? command)
+    private async Task OpenCommandAsync(string? command)
     {
         if (string.IsNullOrWhiteSpace(command))
         {
             return;
         }
 
-        StatusText = _terminalLauncher.OpenSsh(command)
+        var launched = await _terminalLauncher.LaunchSshAsync(command, _shutdownCancellation.Token);
+        StatusText = launched
             ? $"Opened: {command}"
-            : "Could not launch terminal. Command was not run.";
+            : $"Could not launch terminal. Run manually: {command}";
     }
 }

@@ -6,6 +6,16 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LanInspector.Core", "src\La
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LanInspector.UI", "src\LanInspector.UI\LanInspector.UI.csproj", "{AE83D86E-5B37-4E93-BB45-946A52E86E92}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LanInspector.Platform.Windows", "src\LanInspector.Platform.Windows\LanInspector.Platform.Windows.csproj", "{EEDBBBE7-5F5F-4563-9EF8-E481CBFE2C35}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LanInspector.Platform.Linux", "src\LanInspector.Platform.Linux\LanInspector.Platform.Linux.csproj", "{9B4162F2-F3A9-4098-8CE7-B0C1B19F3724}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LanInspector.Platform.MacOS", "src\LanInspector.Platform.MacOS\LanInspector.Platform.MacOS.csproj", "{FCAE1255-D481-4E9C-978D-7325E7A57345}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LanInspector.Cli", "src\LanInspector.Cli\LanInspector.Cli.csproj", "{7CFEC56D-B59E-4FA0-A6F4-5314E6FE4F8C}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LanInspector.Tests", "tests\LanInspector.Tests\LanInspector.Tests.csproj", "{6022CFDD-CADA-497D-907C-FE0C405C3544}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -20,6 +30,26 @@ Global
 		{AE83D86E-5B37-4E93-BB45-946A52E86E92}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{AE83D86E-5B37-4E93-BB45-946A52E86E92}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{AE83D86E-5B37-4E93-BB45-946A52E86E92}.Release|Any CPU.Build.0 = Release|Any CPU
+		{EEDBBBE7-5F5F-4563-9EF8-E481CBFE2C35}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EEDBBBE7-5F5F-4563-9EF8-E481CBFE2C35}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EEDBBBE7-5F5F-4563-9EF8-E481CBFE2C35}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EEDBBBE7-5F5F-4563-9EF8-E481CBFE2C35}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9B4162F2-F3A9-4098-8CE7-B0C1B19F3724}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9B4162F2-F3A9-4098-8CE7-B0C1B19F3724}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9B4162F2-F3A9-4098-8CE7-B0C1B19F3724}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9B4162F2-F3A9-4098-8CE7-B0C1B19F3724}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FCAE1255-D481-4E9C-978D-7325E7A57345}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FCAE1255-D481-4E9C-978D-7325E7A57345}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FCAE1255-D481-4E9C-978D-7325E7A57345}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FCAE1255-D481-4E9C-978D-7325E7A57345}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7CFEC56D-B59E-4FA0-A6F4-5314E6FE4F8C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7CFEC56D-B59E-4FA0-A6F4-5314E6FE4F8C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7CFEC56D-B59E-4FA0-A6F4-5314E6FE4F8C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7CFEC56D-B59E-4FA0-A6F4-5314E6FE4F8C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6022CFDD-CADA-497D-907C-FE0C405C3544}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6022CFDD-CADA-497D-907C-FE0C405C3544}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6022CFDD-CADA-497D-907C-FE0C405C3544}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6022CFDD-CADA-497D-907C-FE0C405C3544}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
