@@ -67,8 +67,15 @@ public sealed class FlipperSerialService : IFlipperConnectionService
             await Task.Delay(500, ct);
             DrainInput();
 
-            var version = await RunCommandAsync("version", TimeSpan.FromSeconds(5));
-            DeviceInfo  = ParseVersionOutput(version, name);
+            // `version` exists in official firmware; community firmware (Momentum,
+            // Unleashed, etc.) removed it — fall back through known alternatives.
+            var version = await RunCommandAsync("version", TimeSpan.FromSeconds(3));
+            if (IsUnknownCommand(version))
+                version = await RunCommandAsync("unit_info", TimeSpan.FromSeconds(3));
+            if (IsUnknownCommand(version))
+                version = "";   // no version info available; still connect
+
+            DeviceInfo = ParseVersionOutput(version, name);
             State       = FlipperConnectionState.Connected;
             return true;
         }
@@ -380,6 +387,11 @@ public sealed class FlipperSerialService : IFlipperConnectionService
 
         return portName;
     }
+
+    private static bool IsUnknownCommand(string response) =>
+        response.Contains("could not find", StringComparison.OrdinalIgnoreCase) ||
+        response.Contains("unknown command", StringComparison.OrdinalIgnoreCase) ||
+        response.Contains("not found",       StringComparison.OrdinalIgnoreCase);
 
     // ── Version parsing ───────────────────────────────────────────────────────
 

@@ -1030,9 +1030,9 @@ internal static class CliApp
             return;
         }
 
-        Console.WriteLine($"connected ({flipper.DeviceInfo?.PortName})");
-        if (flipper.DeviceInfo is { } info && !string.IsNullOrWhiteSpace(info.FirmwareVersion))
-            Console.WriteLine($"  Firmware: {info.FirmwareVersion}");
+        var fw = flipper.DeviceInfo?.FirmwareVersion;
+        Console.WriteLine($"connected ({flipper.DeviceInfo?.PortName})" +
+                          (string.IsNullOrWhiteSpace(fw) ? "" : $"  fw {fw}"));
         Console.WriteLine();
 
         switch (sub)
@@ -1101,11 +1101,21 @@ internal static class CliApp
         Console.WriteLine("Flipper Zero Device Info");
         Console.WriteLine(new string('-', 40));
         Console.WriteLine($"  Port:     {info.PortName}");
-        Console.WriteLine($"  Firmware: {info.FirmwareVersion}");
-        Console.WriteLine($"  Hardware: {info.HardwareVersion}");
-        Console.WriteLine($"  Target:   {info.Target}");
-        Console.WriteLine($"  Build:    {info.BuildDate}");
+        Console.WriteLine($"  Firmware: {Or(info.FirmwareVersion, "(unknown)")}");
+        Console.WriteLine($"  Hardware: {Or(info.HardwareVersion, "(unknown)")}");
+        Console.WriteLine($"  Target:   {Or(info.Target,          "(unknown)")}");
+        Console.WriteLine($"  Build:    {Or(info.BuildDate,       "(unknown)")}");
+
+        if (string.IsNullOrWhiteSpace(info.FirmwareVersion))
+        {
+            Console.WriteLine();
+            Console.WriteLine("  Note: firmware version not exposed by this firmware build.");
+            Console.WriteLine("  Run 'flipper cmd help' to see available CLI commands.");
+        }
     }
+
+    private static string Or(string? value, string fallback) =>
+        string.IsNullOrWhiteSpace(value) ? fallback : value;
 
     private static async Task RunFlipperSubGhzAsync(FlipperSerialService flipper, string[] args, CancellationToken ct)
     {
