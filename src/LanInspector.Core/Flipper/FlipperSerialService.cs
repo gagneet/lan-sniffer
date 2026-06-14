@@ -262,7 +262,6 @@ public sealed class FlipperSerialService : IFlipperConnectionService
 
         if (OperatingSystem.IsLinux())
         {
-            // Prefer the port with the Flipper VID/PID in sysfs
             var byId = FindLinuxFlipperPort();
             if (byId is not null) return byId;
             return ports.Where(p => p.StartsWith("/dev/ttyACM")).OrderBy(p => p).FirstOrDefault();
@@ -271,7 +270,13 @@ public sealed class FlipperSerialService : IFlipperConnectionService
         if (OperatingSystem.IsMacOS())
             return ports.FirstOrDefault(p => p.Contains("usbmodem") || p.Contains("Flipper"));
 
-        // Windows: can't easily filter without WMI; return first COM port
+        if (OperatingSystem.IsWindows())
+        {
+            var known = GetWindowsFlipperPorts();
+            // Prefer the first confirmed Flipper port; fall back to first COM port
+            return known.Keys.OrderBy(p => p).FirstOrDefault() ?? ports.FirstOrDefault();
+        }
+
         return ports.FirstOrDefault();
     }
 
@@ -279,8 +284,8 @@ public sealed class FlipperSerialService : IFlipperConnectionService
     {
         foreach (var port in SerialPort.GetPortNames())
         {
-            var baseName   = Path.GetFileName(port);
-            var vendorFile = $"/sys/class/tty/{baseName}/device/../idVendor";
+            var baseName    = Path.GetFileName(port);
+            var vendorFile  = $"/sys/class/tty/{baseName}/device/../idVendor";
             var productFile = $"/sys/class/tty/{baseName}/device/../idProduct";
 
             if (!File.Exists(vendorFile) || !File.Exists(productFile))
@@ -297,30 +302,83 @@ public sealed class FlipperSerialService : IFlipperConnectionService
         return null;
     }
 
+    // Reads HKLM\SYSTEM\CurrentControlSet\Enum\USB\VID_0483&PID_5740 to find
+    // any COM ports belonging to the Flipper Zero (STM32 VCP, VID 0483 / PID 5740).
+    // Returns portName → friendly description, e.g. "COM3" → "STM32 Virtual COM Port (COM3)".
+    private static Dictionary<string, string> GetWindowsFlipperPorts()
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (!OperatingSystem.IsWindows()) return result;
+
+        try
+        {
+            using var usbKey = Microsoft.Win32.Registry.LocalMachine
+                .OpenSubKey(@"SYSTEM\CurrentControlSet\Enum\USB");
+            if (usbKey is null) return result;
+
+            foreach (var keyName in usbKey.GetSubKeyNames())
+            {
+                // Match VID_0483&PID_5740 exactly, or composite devices like VID_0483&PID_5740&MI_00
+                if (!keyName.StartsWith("VID_0483&PID_5740", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                using var deviceKey = usbKey.OpenSubKey(keyName);
+                if (deviceKey is null) continue;
+
+                foreach (var instance in deviceKey.GetSubKeyNames())
+                {
+                    using var instKey = deviceKey.OpenSubKey(instance);
+                    if (instKey is null) continue;
+
+                    var friendly = instKey.GetValue("FriendlyName") as string ?? "Flipper Zero";
+
+                    using var devParams = instKey.OpenSubKey("Device Parameters");
+                    var portName = devParams?.GetValue("PortName") as string;
+
+                    if (!string.IsNullOrEmpty(portName))
+                        result[portName] = friendly;
+                }
+            }
+        }
+        catch { /* registry access denied or unavailable */ }
+
+        return result;
+    }
+
     private static bool IsLikelyFlipper(string portName)
     {
-        if (OperatingSystem.IsLinux())  return portName.StartsWith("/dev/ttyACM");
-        if (OperatingSystem.IsMacOS())  return portName.Contains("usbmodem") || portName.Contains("Flipper");
-        return portName.StartsWith("COM");
+        if (OperatingSystem.IsLinux())   return portName.StartsWith("/dev/ttyACM");
+        if (OperatingSystem.IsMacOS())   return portName.Contains("usbmodem") || portName.Contains("Flipper");
+        if (OperatingSystem.IsWindows()) return GetWindowsFlipperPorts().ContainsKey(portName);
+        return false;
     }
 
     private static string GetPortDescription(string portName)
     {
-        if (!OperatingSystem.IsLinux()) return portName;
-
-        var baseName    = Path.GetFileName(portName);
-        var vendorPath  = $"/sys/class/tty/{baseName}/device/../idVendor";
-        var productPath = $"/sys/class/tty/{baseName}/device/../idProduct";
-
-        if (!File.Exists(vendorPath)) return portName;
-
-        try
+        if (OperatingSystem.IsWindows())
         {
-            var vid = File.ReadAllText(vendorPath).Trim();
-            var pid = File.ReadAllText(productPath).Trim();
-            return (vid, pid) == ("0483", "5740") ? "Flipper Zero (USB CDC)" : $"USB VID:{vid} PID:{pid}";
+            var known = GetWindowsFlipperPorts();
+            return known.TryGetValue(portName, out var desc) ? desc : portName;
         }
-        catch { return portName; }
+
+        if (OperatingSystem.IsLinux())
+        {
+            var baseName    = Path.GetFileName(portName);
+            var vendorPath  = $"/sys/class/tty/{baseName}/device/../idVendor";
+            var productPath = $"/sys/class/tty/{baseName}/device/../idProduct";
+
+            if (!File.Exists(vendorPath)) return portName;
+
+            try
+            {
+                var vid = File.ReadAllText(vendorPath).Trim();
+                var pid = File.ReadAllText(productPath).Trim();
+                return (vid, pid) == ("0483", "5740") ? "Flipper Zero (USB CDC)" : $"USB VID:{vid} PID:{pid}";
+            }
+            catch { return portName; }
+        }
+
+        return portName;
     }
 
     // ── Version parsing ───────────────────────────────────────────────────────
