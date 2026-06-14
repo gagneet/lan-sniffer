@@ -1057,9 +1057,13 @@ internal static class CliApp
                 await RunFlipperTopologyAsync(flipper, rest, knownDevices, tailscale, ct);
                 break;
 
+            case "cmd":
+                await RunFlipperRawCmdAsync(flipper, rest, ct);
+                break;
+
             default:
                 Console.Error.WriteLine($"Unknown flipper subcommand: {sub}");
-                Console.Error.WriteLine("Usage: laninspector flipper detect|ports|info|subghz|nfc|rfid|topology [options]");
+                Console.Error.WriteLine("Usage: laninspector flipper detect|ports|info|subghz|nfc|rfid|topology|cmd [options]");
                 break;
         }
     }
@@ -1215,6 +1219,29 @@ internal static class CliApp
         Console.WriteLine($"  Protocol: {result.Protocol ?? "(unknown)"}");
     }
 
+    private static async Task RunFlipperRawCmdAsync(FlipperSerialService flipper, string[] args, CancellationToken ct)
+    {
+        if (args.Length == 0)
+        {
+            Console.Error.WriteLine("Usage: laninspector flipper cmd <command> [--timeout <sec>]");
+            Console.Error.WriteLine("  Sends a raw CLI command to the Flipper and prints the response.");
+            Console.Error.WriteLine("  Example: laninspector flipper cmd version");
+            return;
+        }
+
+        var timeoutSec = 10;
+        for (var i = 0; i < args.Length - 1; i++)
+            if (args[i] == "--timeout" && int.TryParse(args[i + 1], out var t))
+                timeoutSec = t;
+
+        var command = args[0];
+        var response = await flipper.ExecuteCommandAsync(command, TimeSpan.FromSeconds(timeoutSec), ct);
+
+        Console.WriteLine($"--- response to '{command}' ---");
+        Console.WriteLine(response);
+        Console.WriteLine("--- end ---");
+    }
+
     private static async Task RunFlipperTopologyAsync(FlipperSerialService flipper, string[] args, IReadOnlyList<KnownDeviceDefinition> knownDevices, ITailscaleService tailscale, CancellationToken ct)
     {
         var outputMermaid = args.Contains("--mermaid");
@@ -1315,6 +1342,7 @@ internal static class CliApp
         Console.WriteLine("  flipper nfc [--timeout <sec>]             Detect NFC card");
         Console.WriteLine("  flipper rfid [--timeout <sec>]            Read 125 kHz RFID tag");
         Console.WriteLine("  flipper topology [--duration <sec>] [--json|--mermaid]  Topology with IoT");
+        Console.WriteLine("  flipper cmd <command> [--timeout <sec>]            Raw CLI passthrough");
         Console.WriteLine();
         Console.WriteLine("Known device config is loaded from (first match wins):");
         Console.WriteLine("  ./known-devices.json");

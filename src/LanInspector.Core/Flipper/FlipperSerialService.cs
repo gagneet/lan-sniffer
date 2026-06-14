@@ -385,15 +385,46 @@ public sealed class FlipperSerialService : IFlipperConnectionService
 
     private static FlipperDeviceInfo ParseVersionOutput(string output, string portName)
     {
-        string fw = "", hw = "", target = "", build = "";
-        foreach (var line in output.Split('\n'))
+        // Collect every "Key : Value" / "Key: Value" pair so we can handle both
+        // old firmware ("SW version : 0.88.0") and new firmware ("Git Tag : 0.97.0")
+        // without hard-coding exact spacing.
+        var fields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var raw in output.Split('\n'))
         {
-            var t = line.Trim();
-            if (t.StartsWith("SW version", StringComparison.OrdinalIgnoreCase))   fw     = After(t, ':');
-            else if (t.StartsWith("HW version", StringComparison.OrdinalIgnoreCase)) hw   = After(t, ':');
-            else if (t.StartsWith("Build date", StringComparison.OrdinalIgnoreCase)) build = After(t, ':');
-            else if (t.StartsWith("Target",     StringComparison.OrdinalIgnoreCase)) target = After(t, ':');
+            var line = raw.Trim();
+            var colonIdx = line.IndexOf(':');
+            if (colonIdx <= 0) continue;
+
+            var key   = line[..colonIdx].Trim();
+            var value = line[(colonIdx + 1)..].Trim();
+            if (!string.IsNullOrEmpty(key) && !string.IsNullOrEmpty(value))
+                fields.TryAdd(key, value);
         }
+
+        // Firmware version: new firmware uses "Git Tag", old uses "SW version"
+        var fw = fields.GetValueOrDefault("Git Tag")
+              ?? fields.GetValueOrDefault("Git Branch Num")
+              ?? fields.GetValueOrDefault("SW version")
+              ?? "";
+
+        // Hardware: old firmware has an "HW version" line; new firmware uses Target
+        var hw = fields.GetValueOrDefault("HW version") ?? "";
+
+        var target = fields.GetValueOrDefault("Target") ?? "";
+
+        // Build date: new firmware splits date and time into two keys
+        var buildDate = fields.GetValueOrDefault("Build Date")
+                     ?? fields.GetValueOrDefault("Build date")
+                     ?? "";
+        var buildTime = fields.GetValueOrDefault("Build Time") ?? "";
+        var build = (buildDate, buildTime) switch
+        {
+            ({ Length: > 0 }, { Length: > 0 }) => $"{buildDate} {buildTime}",
+            ({ Length: > 0 }, _)               => buildDate,
+            _                                  => ""
+        };
+
         return new FlipperDeviceInfo(portName, fw, hw, target, build);
     }
 
