@@ -67,9 +67,11 @@ public sealed class FlipperSerialService : IFlipperConnectionService
             await Task.Delay(500, ct);
             DrainInput();
 
-            // `version` exists in official firmware; community firmware (Momentum,
-            // Unleashed, etc.) removed it — fall back through known alternatives.
+            // Firmware 1.x uses `device_info`; older official firmware used `version`;
+            // some community builds use `unit_info`. Try all three in order.
             var version = await RunCommandAsync("version", TimeSpan.FromSeconds(3));
+            if (IsUnknownCommand(version))
+                version = await RunCommandAsync("device_info", TimeSpan.FromSeconds(3));
             if (IsUnknownCommand(version))
                 version = await RunCommandAsync("unit_info", TimeSpan.FromSeconds(3));
             if (IsUnknownCommand(version))
@@ -414,19 +416,38 @@ public sealed class FlipperSerialService : IFlipperConnectionService
                 fields.TryAdd(key, value);
         }
 
-        // Firmware version: new firmware uses "Git Tag", old uses "SW version"
-        var fw = fields.GetValueOrDefault("Git Tag")
-              ?? fields.GetValueOrDefault("Git Branch Num")
-              ?? fields.GetValueOrDefault("SW version")
-              ?? "";
+        // Firmware version
+        // firmware 1.x device_info: "firmware_branch" → e.g. "release-1.43"
+        // firmware 0.x version:     "Git Tag"         → e.g. "0.97.0"
+        // older firmware version:   "SW version"      → e.g. "0.88.0 abc ..."
+        var fwRaw = fields.GetValueOrDefault("firmware_branch")
+                 ?? fields.GetValueOrDefault("Git Tag")
+                 ?? fields.GetValueOrDefault("Git Branch Num")
+                 ?? fields.GetValueOrDefault("SW version")
+                 ?? "";
+        // Strip "release-" prefix so we show "1.43" not "release-1.43"
+        var fw = fwRaw.StartsWith("release-", StringComparison.OrdinalIgnoreCase)
+                     ? fwRaw["release-".Length..]
+                     : fwRaw;
 
-        // Hardware: old firmware has an "HW version" line; new firmware uses Target
-        var hw = fields.GetValueOrDefault("HW version") ?? "";
+        // Hardware
+        // firmware 1.x: "hardware_model" + "hardware_ver"; old: "HW version"
+        var hwModel = fields.GetValueOrDefault("hardware_model") ?? "";
+        var hwVer   = fields.GetValueOrDefault("hardware_ver")   ?? "";
+        var hw = fields.GetValueOrDefault("HW version")
+              ?? (hwModel.Length > 0 || hwVer.Length > 0
+                      ? $"{hwModel} v{hwVer}".Trim(' ', 'v')
+                      : "");
 
-        var target = fields.GetValueOrDefault("Target") ?? "";
+        // Target
+        var target = fields.GetValueOrDefault("firmware_target")
+                  ?? fields.GetValueOrDefault("Target")
+                  ?? "";
 
-        // Build date: new firmware splits date and time into two keys
-        var buildDate = fields.GetValueOrDefault("Build Date")
+        // Build date
+        // firmware 1.x: "firmware_build_date"; 0.x: "Build Date" + optional "Build Time"
+        var buildDate = fields.GetValueOrDefault("firmware_build_date")
+                     ?? fields.GetValueOrDefault("Build Date")
                      ?? fields.GetValueOrDefault("Build date")
                      ?? "";
         var buildTime = fields.GetValueOrDefault("Build Time") ?? "";
