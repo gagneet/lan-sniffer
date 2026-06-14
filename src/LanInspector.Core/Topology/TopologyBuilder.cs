@@ -1,5 +1,7 @@
 using System.Net;
 using LanInspector.Core.Configuration;
+using LanInspector.Core.Flipper;
+using LanInspector.Core.Flipper.SubGhz;
 using LanInspector.Core.Model;
 using LanInspector.Core.Network;
 using LanInspector.Core.RemoteAccess;
@@ -175,6 +177,70 @@ public sealed class TopologyBuilder
         }
 
         return this;
+    }
+
+    /// <summary>
+    /// Enrich the topology with IoT devices detected by the Flipper Zero sub-GHz radio.
+    /// Each unique (frequency, protocol) combination becomes a WirelessIoT node linked
+    /// to this machine with a SubGhz edge.
+    /// </summary>
+    public TopologyBuilder AddFlipperSubGhzDevices(SubGhzScanResult scanResult)
+    {
+        if (!scanResult.Succeeded || scanResult.Signals.Count == 0)
+            return this;
+
+        var localNodeId = _nodes.FirstOrDefault(n => n.Type == NetworkNodeType.ThisMachine)?.Id ?? "local";
+
+        // Deduplicate by (protocol, frequency bucket) so one device doesn't appear N times
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var signal in scanResult.Signals)
+        {
+            var proto  = signal.Protocol;
+            var bucket = $"{signal.FrequencyMhz:F2}:{proto}:{signal.DecodedData ?? "raw"}";
+            if (!seen.Add(bucket)) continue;
+
+            var nodeId = $"flipper:subghz:{bucket}";
+            var label  = $"{signal.ProtocolLabel} @ {signal.FrequencyLabel}";
+
+            AddNode(new TopologyNode
+            {
+                Id          = nodeId,
+                DisplayName = label,
+                Type        = NetworkNodeType.WirelessIoT,
+                Confidence  = proto == SubGhzProtocol.Unknown || proto == SubGhzProtocol.Raw
+                                  ? TopologyConfidence.Low
+                                  : TopologyConfidence.Medium,
+                Evidence = BuildFlipperEvidence(signal)
+            });
+
+            AddEdge(new TopologyEdge
+            {
+                FromId     = localNodeId,
+                ToId       = nodeId,
+                LinkType   = TopologyLinkType.SubGhz,
+                Confidence = TopologyConfidence.Low,
+                Label      = $"{signal.FrequencyMhz:F3} MHz",
+                Evidence   = [$"Flipper sub-GHz scan", $"RSSI: {signal.RssiDbm:F1} dBm"]
+            });
+        }
+
+        return this;
+    }
+
+    private static IReadOnlyList<string> BuildFlipperEvidence(SubGhzSignal signal)
+    {
+        var ev = new List<string>
+        {
+            $"Detected by Flipper Zero sub-GHz radio",
+            $"Frequency: {signal.FrequencyLabel}",
+            $"RSSI: {signal.RssiDbm:F1} dBm",
+            $"Protocol: {signal.ProtocolLabel}"
+        };
+        if (signal.DecodedData is not null)
+            ev.Add($"Data: {signal.DecodedData}");
+        ev.Add($"Detected at: {signal.DetectedAt:u}");
+        return ev;
     }
 
     public NetworkTopologySnapshot Build() =>

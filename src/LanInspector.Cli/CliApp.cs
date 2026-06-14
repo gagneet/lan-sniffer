@@ -5,6 +5,9 @@ using System.Text.Json;
 using LanInspector.Core.Configuration;
 using LanInspector.Core.Diagnostics;
 using LanInspector.Core.Dns;
+using LanInspector.Core.Flipper;
+using LanInspector.Core.Flipper.Nfc;
+using LanInspector.Core.Flipper.SubGhz;
 using LanInspector.Core.Network;
 using LanInspector.Core.Nmap;
 using LanInspector.Core.RemoteAccess;
@@ -111,6 +114,10 @@ internal static class CliApp
 
             case "snmp":
                 await RunSnmpAsync(rest, ct);
+                break;
+
+            case "flipper":
+                await RunFlipperAsync(rest, knownDevices, tailscale, ct);
                 break;
 
             default:
@@ -992,6 +999,289 @@ internal static class CliApp
         }
     }
 
+    private static async Task RunFlipperAsync(string[] args, IReadOnlyList<KnownDeviceDefinition> knownDevices, ITailscaleService tailscale, CancellationToken ct)
+    {
+        var sub  = args.Length > 0 ? args[0].ToLowerInvariant() : "detect";
+        var rest = args.Skip(1).ToArray();
+
+        await using var flipper = new FlipperSerialService();
+
+        switch (sub)
+        {
+            case "detect":
+                RunFlipperDetect(flipper);
+                return;
+
+            case "ports":
+                RunFlipperPorts(flipper);
+                return;
+        }
+
+        // Commands below require a live connection
+        var port = rest.Contains("--port") ? rest[Array.IndexOf(rest, "--port") + 1] : null;
+
+        Console.Write("Connecting to Flipper Zero... ");
+        var connected = await flipper.ConnectAsync(port, ct);
+        if (!connected)
+        {
+            Console.Error.WriteLine("failed.");
+            Console.Error.WriteLine("Check the USB cable and that no other application (Flipper Mobile App, qFlipper) is using the port.");
+            Console.Error.WriteLine("Use 'flipper ports' to list available serial ports.");
+            return;
+        }
+
+        Console.WriteLine($"connected ({flipper.DeviceInfo?.PortName})");
+        if (flipper.DeviceInfo is { } info && !string.IsNullOrWhiteSpace(info.FirmwareVersion))
+            Console.WriteLine($"  Firmware: {info.FirmwareVersion}");
+        Console.WriteLine();
+
+        switch (sub)
+        {
+            case "info":
+                PrintFlipperInfo(flipper.DeviceInfo);
+                break;
+
+            case "subghz":
+                await RunFlipperSubGhzAsync(flipper, rest, ct);
+                break;
+
+            case "nfc":
+                await RunFlipperNfcAsync(flipper, rest, ct);
+                break;
+
+            case "rfid":
+                await RunFlipperRfidAsync(flipper, rest, ct);
+                break;
+
+            case "topology":
+                await RunFlipperTopologyAsync(flipper, rest, knownDevices, tailscale, ct);
+                break;
+
+            default:
+                Console.Error.WriteLine($"Unknown flipper subcommand: {sub}");
+                Console.Error.WriteLine("Usage: laninspector flipper detect|ports|info|subghz|nfc|rfid|topology [options]");
+                break;
+        }
+    }
+
+    private static void RunFlipperDetect(FlipperSerialService flipper)
+    {
+        Console.WriteLine("Flipper Zero — port detection");
+        Console.WriteLine(new string('-', 40));
+
+        var ports = flipper.DetectPorts();
+        if (ports.Count == 0)
+        {
+            Console.WriteLine("No serial ports found.");
+            Console.WriteLine("Connect the Flipper Zero via USB and ensure the driver is installed.");
+            return;
+        }
+
+        foreach (var p in ports)
+        {
+            var marker = p.LooksLikeFlipper ? " <-- likely Flipper" : "";
+            Console.WriteLine($"  {p.Name,-20} {p.Description}{marker}");
+        }
+    }
+
+    private static void RunFlipperPorts(FlipperSerialService flipper)
+    {
+        var ports = flipper.DetectPorts();
+        foreach (var p in ports)
+            Console.WriteLine(p.Name);
+    }
+
+    private static void PrintFlipperInfo(FlipperDeviceInfo? info)
+    {
+        if (info is null) { Console.WriteLine("No device info."); return; }
+        Console.WriteLine("Flipper Zero Device Info");
+        Console.WriteLine(new string('-', 40));
+        Console.WriteLine($"  Port:     {info.PortName}");
+        Console.WriteLine($"  Firmware: {info.FirmwareVersion}");
+        Console.WriteLine($"  Hardware: {info.HardwareVersion}");
+        Console.WriteLine($"  Target:   {info.Target}");
+        Console.WriteLine($"  Build:    {info.BuildDate}");
+    }
+
+    private static async Task RunFlipperSubGhzAsync(FlipperSerialService flipper, string[] args, CancellationToken ct)
+    {
+        // Parse --freq / --duration flags
+        var freqs = new List<double>();
+        var durationSec = 5;
+
+        for (var i = 0; i < args.Length; i++)
+        {
+            if (args[i] == "--freq" && i + 1 < args.Length && double.TryParse(args[i + 1], out var f))
+                freqs.Add(f);
+            if (args[i] == "--duration" && i + 1 < args.Length && int.TryParse(args[i + 1], out var d))
+                durationSec = d;
+        }
+
+        IEnumerable<double>? freqList = freqs.Count > 0 ? freqs : null;
+        var dwell = TimeSpan.FromSeconds(durationSec);
+        var defaults = freqList is null ? " (315, 433.92, 868.35, 915 MHz)" : "";
+
+        Console.WriteLine($"Sub-GHz IoT scan — {dwell.TotalSeconds:0}s per frequency{defaults}");
+        Console.WriteLine(new string('-', 50));
+        Console.WriteLine("Scanning... (press Ctrl+C to abort early)");
+        Console.WriteLine();
+
+        using var longCt = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        longCt.CancelAfter(TimeSpan.FromMinutes(5));
+
+        var svc    = new FlipperSubGhzService(flipper);
+        var result = await svc.ScanAsync(freqList, dwell, longCt.Token);
+
+        Console.WriteLine($"Scan complete — {result.FrequenciesScanned.Count} frequency/ies, {(int)result.Duration.TotalSeconds}s elapsed");
+        Console.WriteLine();
+
+        if (!result.Succeeded)
+        {
+            Console.Error.WriteLine($"Error: {result.Error}");
+            return;
+        }
+
+        if (result.Signals.Count == 0)
+        {
+            Console.WriteLine("No signals detected. Try:");
+            Console.WriteLine("  • Bring the Flipper closer to IoT devices");
+            Console.WriteLine("  • Use --duration 15 for longer dwell time");
+            Console.WriteLine("  • Use --freq 433.92 to focus on EU IoT band");
+            return;
+        }
+
+        Console.WriteLine($"Detected {result.Signals.Count} signal(s):");
+        Console.WriteLine();
+        foreach (var sig in result.Signals)
+        {
+            Console.WriteLine($"  [{sig.FrequencyLabel}]");
+            Console.WriteLine($"    Protocol : {sig.ProtocolLabel}");
+            Console.WriteLine($"    RSSI     : {sig.RssiDbm:F1} dBm");
+            if (sig.DecodedData is not null)
+                Console.WriteLine($"    Data     : {sig.DecodedData}");
+            Console.WriteLine();
+        }
+    }
+
+    private static async Task RunFlipperNfcAsync(FlipperSerialService flipper, string[] args, CancellationToken ct)
+    {
+        var timeoutSec = 10;
+        for (var i = 0; i < args.Length - 1; i++)
+            if (args[i] == "--timeout" && int.TryParse(args[i + 1], out var t))
+                timeoutSec = t;
+
+        Console.WriteLine($"NFC detection — waiting up to {timeoutSec}s for a card...");
+        Console.WriteLine("Hold an NFC card near the Flipper's top.");
+        Console.WriteLine();
+
+        var svc    = new FlipperNfcService(flipper);
+        var result = await svc.DetectAsync(TimeSpan.FromSeconds(timeoutSec), ct);
+
+        if (!result.Detected)
+        {
+            Console.WriteLine(result.Error is not null ? $"Error: {result.Error}" : "No NFC card detected within the timeout.");
+            return;
+        }
+
+        Console.WriteLine("NFC card detected:");
+        Console.WriteLine($"  UID:  {result.Uid ?? "(unknown)"}");
+        Console.WriteLine($"  Type: {result.CardType ?? "(unknown)"}");
+        if (result.Atqa is not null) Console.WriteLine($"  ATQA: {result.Atqa}");
+        if (result.Sak  is not null) Console.WriteLine($"  SAK:  {result.Sak}");
+    }
+
+    private static async Task RunFlipperRfidAsync(FlipperSerialService flipper, string[] args, CancellationToken ct)
+    {
+        var timeoutSec = 10;
+        for (var i = 0; i < args.Length - 1; i++)
+            if (args[i] == "--timeout" && int.TryParse(args[i + 1], out var t))
+                timeoutSec = t;
+
+        Console.WriteLine($"125 kHz RFID detection — waiting up to {timeoutSec}s for a tag...");
+        Console.WriteLine("Hold an RFID card/fob near the Flipper's top.");
+        Console.WriteLine();
+
+        var svc    = new FlipperNfcService(flipper);
+        var result = await svc.ReadRfidAsync(TimeSpan.FromSeconds(timeoutSec), ct);
+
+        if (!result.Detected)
+        {
+            Console.WriteLine(result.Error is not null ? $"Error: {result.Error}" : "No RFID tag detected within the timeout.");
+            return;
+        }
+
+        Console.WriteLine("RFID tag detected:");
+        Console.WriteLine($"  Data:     {result.Data ?? "(unknown)"}");
+        Console.WriteLine($"  Protocol: {result.Protocol ?? "(unknown)"}");
+    }
+
+    private static async Task RunFlipperTopologyAsync(FlipperSerialService flipper, string[] args, IReadOnlyList<KnownDeviceDefinition> knownDevices, ITailscaleService tailscale, CancellationToken ct)
+    {
+        var outputMermaid = args.Contains("--mermaid");
+        var outputJson    = args.Contains("--json");
+
+        var durationSec = 5;
+        for (var i = 0; i < args.Length - 1; i++)
+            if (args[i] == "--duration" && int.TryParse(args[i + 1], out var d))
+                durationSec = d;
+
+        Console.WriteLine($"Flipper topology scan — {durationSec}s per sub-GHz frequency");
+        Console.WriteLine(new string('-', 50));
+
+        var svc    = new FlipperSubGhzService(flipper);
+        var scan   = await svc.ScanAsync(null, TimeSpan.FromSeconds(durationSec), ct);
+
+        var profile = new LocalNetworkProfileProvider().GetCurrentProfile();
+        var ts      = await tailscale.GetStatusAsync(ct);
+
+        var snapshot = new TopologyBuilder()
+            .AddLocalProfile(profile)
+            .AddKnownDevices(knownDevices, [])
+            .AddTailscaleStatus(ts)
+            .AddFlipperSubGhzDevices(scan)
+            .Build();
+
+        if (outputJson)
+        {
+            var opts = new JsonSerializerOptions { WriteIndented = true };
+            Console.WriteLine(JsonSerializer.Serialize(new
+            {
+                capturedAt = snapshot.CapturedAt,
+                nodes = snapshot.Nodes.Select(n => new { n.Id, n.DisplayName, type = n.Type.ToString(), confidence = n.Confidence.ToString(), n.Evidence }),
+                edges = snapshot.Edges.Select(e => new { e.FromId, e.ToId, linkType = e.LinkType.ToString(), e.Label })
+            }, opts));
+            return;
+        }
+
+        if (outputMermaid)
+        {
+            Console.WriteLine(snapshot.ToMermaid());
+            return;
+        }
+
+        Console.WriteLine($"Topology — {snapshot.CapturedAt:u}");
+        Console.WriteLine();
+
+        var iotNodes = snapshot.Nodes.Where(n => n.Type == NetworkNodeType.WirelessIoT).ToList();
+        if (iotNodes.Count == 0)
+        {
+            Console.WriteLine("No wireless IoT devices detected via sub-GHz.");
+        }
+        else
+        {
+            Console.WriteLine($"Wireless IoT devices ({iotNodes.Count}):");
+            foreach (var n in iotNodes)
+            {
+                Console.WriteLine($"  {n.DisplayName} ({n.Confidence})");
+                foreach (var e in n.Evidence) Console.WriteLine($"    + {e}");
+            }
+        }
+
+        Console.WriteLine();
+        Console.WriteLine($"Full topology: {snapshot.Nodes.Count} nodes, {snapshot.Edges.Count} edges");
+        Console.WriteLine("Tip: use --mermaid or --json for other output formats");
+    }
+
     private static void PrintHelp()
     {
         Console.WriteLine("LanInspector CLI");
@@ -1018,6 +1308,13 @@ internal static class CliApp
         Console.WriteLine("  pcap export <device> <seconds> [<file>]    Capture PCAP via tshark");
         Console.WriteLine("  dns status|summary|queries|client <ip>     DNS filter provider");
         Console.WriteLine("  snmp <ip> [--community <c>]                SNMP query");
+        Console.WriteLine("  flipper detect                             List serial ports, identify Flipper");
+        Console.WriteLine("  flipper ports                              Print Flipper port name(s)");
+        Console.WriteLine("  flipper info [--port <p>]                  Show connected Flipper firmware info");
+        Console.WriteLine("  flipper subghz [--freq <mhz>] [--duration <sec>]  Sub-GHz IoT scan");
+        Console.WriteLine("  flipper nfc [--timeout <sec>]             Detect NFC card");
+        Console.WriteLine("  flipper rfid [--timeout <sec>]            Read 125 kHz RFID tag");
+        Console.WriteLine("  flipper topology [--duration <sec>] [--json|--mermaid]  Topology with IoT");
         Console.WriteLine();
         Console.WriteLine("Known device config is loaded from (first match wins):");
         Console.WriteLine("  ./known-devices.json");

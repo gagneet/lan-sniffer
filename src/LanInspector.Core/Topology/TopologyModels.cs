@@ -9,6 +9,8 @@ public enum NetworkNodeType
     LocalDevice,
     RemoteDevice,
     Internet,
+    WirelessIoT,  // Sub-GHz IoT device detected by Flipper
+    WirelessAP,   // WiFi access point (Flipper WiFi dev board)
     Unknown
 }
 
@@ -17,7 +19,9 @@ public enum TopologyLinkType
     Layer2,       // same subnet, ARP-visible
     Routed,       // different subnet, via gateway
     Tailscale,    // via Tailscale overlay
-    SubnetRoute   // Tailscale subnet route
+    SubnetRoute,  // Tailscale subnet route
+    SubGhz,       // sub-GHz wireless (Flipper)
+    Wireless      // 802.11 WiFi (Flipper WiFi dev board)
 }
 
 public enum TopologyConfidence
