@@ -5,7 +5,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$root = Resolve-Path "$PSScriptRoot\.."
+$root = $PSScriptRoot
 $publishDir = Join-Path $root "artifacts\LanInspector-$Runtime"
 $zipPath = Join-Path $root "artifacts\LanInspector-$Runtime.zip"
 $project = Join-Path $root "src\LanInspector.UI\LanInspector.UI.csproj"
