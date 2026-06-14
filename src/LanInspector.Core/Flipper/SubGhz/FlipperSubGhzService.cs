@@ -33,7 +33,7 @@ public sealed class FlipperSubGhzService : IFlipperSubGhzService
 
                 var freqHz = (long)(freqMhz * 1_000_000);
                 var lines  = await _flipper.ExecuteStreamingCommandAsync(
-                    $"subghz rx {freqHz}", dwell, ct);
+                    $"subghz rx {freqHz} 0", dwell, ct); // 0 = CC1101_INT (built-in radio)
 
                 signals.AddRange(ParseSubGhzOutput(lines, freqMhz));
             }
@@ -64,7 +64,7 @@ public sealed class FlipperSubGhzService : IFlipperSubGhzService
     public async Task<SubGhzSignal?> ListenOnceAsync(double frequencyMhz, TimeSpan timeout, CancellationToken ct = default)
     {
         var freqHz = (long)(frequencyMhz * 1_000_000);
-        var lines  = await _flipper.ExecuteStreamingCommandAsync($"subghz rx {freqHz}", timeout, ct);
+        var lines  = await _flipper.ExecuteStreamingCommandAsync($"subghz rx {freqHz} 0", timeout, ct);
         return ParseSubGhzOutput(lines, frequencyMhz).FirstOrDefault();
     }
 
