@@ -1,0 +1,74 @@
+# Configuring Your Devices
+
+LanInspector ships with **no devices configured**. The application carries nobody's network in it;
+everything below is yours to fill in, and it stays on your machine.
+
+## The Settings tab
+
+The **Settings** tab is the simplest route. It lists every configured device with editable columns,
+and **Save** writes to your per-user configuration — never to the copy beside the executable, which
+an application update would overwrite.
+
+| Column | What it is for |
+|---|---|
+| **Critical** | Pins the device to the panel at the top of the window and keeps it checked. |
+| **MAC addresses** | The single most useful field. A MAC does not change when the DHCP lease does, so it is how a device is re-found after it moves. |
+| **IP addresses** | Starting points only — treated as the weakest evidence, because they go stale. |
+| **Subnets** | For a router known by the range it serves, and to tell the locator that an off-subnet address is legitimate for this device rather than noise from a peer's container bridges. |
+| **Hostnames** | Used for DNS and mDNS (`<name>.local`) lookups when the device is on another segment. |
+| **Tailscale names** | Matches the tailnet peer, which supplies both the stable overlay address and live LAN endpoint evidence. |
+| **SSH / user / port** | Enables the SSH buttons and tells the locator which port to probe when verifying an address. |
+| **Tags** | Free-form. `server` additionally opts a device into `laninspector tailscale routes`. |
+
+Lists accept commas or semicolons: `192.168.0.148, 192.168.0.149`.
+
+## Where configuration lives
+
+Files are **merged by device id, later files winning**:
+
+1. `<exe-dir>/Data/known-devices.json` — shipped defaults, empty
+2. `<exe-dir>/Data/known-devices.local.json` — git-ignored, for a portable install
+3. `%APPDATA%\LanInspector\known-devices.json` (Windows)
+   `~/.config/laninspector/known-devices.json` (Linux/macOS) — **where Save writes**
+4. `%APPDATA%\LanInspector\known-devices.local.json`
+
+The CLI reads the same files, plus `./known-devices.json` and `./known-devices.local.json` in the
+working directory, which win over everything else.
+
+Because they merge by id, a later file only needs the fields you want to change:
+
+```json
+{
+  "knownDevices": [
+    { "id": "home-server", "knownMacs": ["68:1d:ef:3c:d5:45"] }
+  ]
+}
+```
+
+## Finding a MAC address
+
+| Where | Command |
+|---|---|
+| Linux | `ip link show` — the `link/ether` value for the LAN interface |
+| macOS | `ifconfig en0` — the `ether` value |
+| Windows | `ipconfig /all` — "Physical Address" |
+| From another machine | `laninspector locate <id>` lists what the ARP cache holds |
+
+Any notation works — `aa:bb:cc:dd:ee:ff`, `AA-BB-CC-DD-EE-FF`, or bare hex.
+
+**Wi-Fi MACs are often randomised.** A MAC whose second hex digit is `2`, `6`, `A` or `E`
+(`86:61:7a:…`) has the locally-administered bit set: it is a private address that will change and
+silently stop matching. Use the wired interface's MAC, or turn off private addressing for that
+network.
+
+## A worked example
+
+`Data/known-devices.example.json` is a template covering a server, a main router and an upstream
+router known only by its subnet. Copy it to `known-devices.local.json` and edit, or use it as a
+reference while filling in the Settings tab.
+
+## A note on sharing
+
+Device names, MAC addresses, internal IPs and SSH usernames describe your home network. Keep them
+in your user configuration rather than committing them: `known-devices.local.json` is git-ignored
+for exactly this reason, and the per-user paths above sit outside the repository entirely.

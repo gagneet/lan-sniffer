@@ -233,6 +233,59 @@ locator falls back to an ICMP echo; a device verified that way is reported at `H
 rather than `Confirmed`, and the candidate is marked `[ping only]` — present, but no service
 proven.
 
+## "Not reachable" when the server is plainly running
+
+A device can be up, busy and perfectly healthy and still show as unreachable, because reachability
+is a property of the network *between* the two machines, not of either one.
+
+The giveaway is which devices work. On this network the Mac Mini reports online while `ubuntu-svr`
+does not, and the only difference between them is that the Mac Mini has a second interface on
+`192.168.87.0/24`:
+
+```text
+ubuntu-svr           enp2s0  192.168.0.148    (1.2 GB in, 653 MB out — plainly alive)
+gagneets-mac-mini    en0     192.168.0.154
+                     en1     192.168.87.118   <-- the reason it is reachable
+```
+
+If the machine running LanInspector is on `192.168.87.x`, then it shares a subnet with the Mac
+Mini's Wi-Fi interface and can reach it directly — while `192.168.0.148` sits behind the
+FAST5366LTE-A, which the Eero has no route into. Nothing is wrong with the server; there is simply
+no path from that side of the house to that subnet. Tailscale still works because it does not use
+that path at all.
+
+The critical-devices panel now says so rather than leaving "Not reachable" to be interpreted:
+
+```text
+This machine is on 192.168.87.0/24; 192.168.0.148 is on 192.168.0.0/24. Those are different
+subnets, and the router between them does not carry traffic from this side to that one. Connect
+to the same network as the target, add a route, or reach it over Tailscale.
+Tailscale reaches it now at ubuntu-svr.
+```
+
+When the target *is* on the same subnet and still does not answer, the message says the opposite —
+that the route is fine and the service or a host firewall is the thing to look at. The two cases
+need opposite responses, so the app names which one it is.
+
+The SSH command follows the same logic: when the LAN address is unconfirmed, the button offers the
+Tailscale name instead, because a command that works beats one that matches the config.
+
+### Confirming it
+
+```bash
+laninspector visibility 192.168.0.148    # explains the path in full
+laninspector locate home-server          # shows every candidate and what answered
+```
+
+If the diagnosis is right, the fix is one of:
+
+- run LanInspector from a machine on `192.168.0.0/24`;
+- advertise `192.168.0.0/24` into the tailnet from `ubuntu-svr`, so the whole subnet is reachable
+  from anywhere (`sudo tailscale up --advertise-routes=192.168.0.0/24`, then approve it);
+- or add a static route on the Eero toward `192.168.0.0/24` via the FAST5366LTE-A, if it allows one.
+
+The middle option is the one that keeps working from outside the house too.
+
 ## Keeping a log of the moves
 
 Each `locate` records where the device was found, in:

@@ -56,6 +56,10 @@ public sealed partial class CriticalDeviceViewModel : ObservableObject
     [ObservableProperty]
     private string _alsoAt = string.Empty;
 
+    /// <summary>Why the device could not be reached, and what to do about it.</summary>
+    [ObservableProperty]
+    private string _diagnosis = string.Empty;
+
     public bool HasSsh => Definition.Ssh?.Enabled == true && !string.IsNullOrWhiteSpace(SshCommand);
 
     public void Update(string status, string currentIp, string routeSummary)
@@ -71,8 +75,10 @@ public sealed partial class CriticalDeviceViewModel : ObservableObject
     /// Applies a locator result. The SSH command is rebuilt against whichever address was actually
     /// found, so a copied command still works after the server's lease changed.
     /// </summary>
-    public void ApplyLocation(DeviceLocation location, string status, string routeSummary)
+    public void ApplyLocation(DeviceLocation location, string status, string routeSummary, string diagnosis = "")
     {
+        Diagnosis = diagnosis;
+
         var address = location.CurrentAddress?.ToString() ?? string.Empty;
 
         Status = status;
@@ -88,11 +94,16 @@ public sealed partial class CriticalDeviceViewModel : ObservableObject
             ? $"was {location.PreviousAddress}" + (location.AddressChangedAt is null ? "" : $" until {location.AddressChangedAt.Value.ToLocalTime():HH:mm:ss}")
             : string.Empty;
 
-        // Fall back to the Tailscale name/address when no LAN address was found, so the action
-        // buttons stay usable rather than going blank exactly when the device is hardest to reach.
-        var sshHost = !string.IsNullOrWhiteSpace(address)
+        // Prefer Tailscale whenever the LAN address is unconfirmed, not only when none was found.
+        // An unverified address is usually one this machine has no route to, so handing out
+        // "ssh user@192.168.0.148" gives a command that cannot work while a working one exists.
+        var overlayHost = location.TailscaleName ?? location.TailscaleAddress?.ToString();
+        var lanIsTrustworthy = !string.IsNullOrWhiteSpace(address)
+            && location.Confidence is LocationConfidence.Confirmed or LocationConfidence.High;
+
+        var sshHost = lanIsTrustworthy
             ? address
-            : location.TailscaleName ?? location.TailscaleAddress?.ToString() ?? string.Empty;
+            : overlayHost ?? address;
         SshCommand = BuildSshCommand(Definition, sshHost);
     }
 

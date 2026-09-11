@@ -1,24 +1,26 @@
 {
-  "//": "Copy to known-devices.local.json and edit. Files are merged by id, later files win.",
-  "//knownMacs": "Best way to track a device across DHCP changes: the MAC does not change when the lease does.",
+  "//": "Template. Copy to known-devices.local.json (or your user config directory) and edit.",
+  "//knownMacs": "The single most useful field: a MAC does not change when the DHCP lease does, so it is how a device is re-found after it moves.",
+  "//tags": "Tag a device 'critical' to pin it to the panel at the top of the window.",
   "knownDevices": [
     {
       "id": "home-server",
       "displayName": "Home Server",
       "deviceType": "Server",
       "knownIps": [
-        "192.168.0.148",
-        "192.168.87.243"
+        "192.168.0.10"
+      ],
+      "knownSubnets": [
+        "192.168.0.0/24"
       ],
       "knownMacs": [
         "00:11:22:33:44:55"
       ],
       "knownHostnames": [
-        "your-server-hostname"
+        "my-server"
       ],
       "knownTailscaleNames": [
-        "home-server",
-        "homeserver"
+        "my-server"
       ],
       "ssh": {
         "enabled": true,
@@ -31,11 +33,14 @@
       ]
     },
     {
-      "id": "fast5366lte-a",
-      "displayName": "FAST5366LTE-A / Optus Modem",
+      "id": "main-router",
+      "displayName": "Main Router",
       "deviceType": "Router",
       "knownIps": [
         "192.168.0.1"
+      ],
+      "knownSubnets": [
+        "192.168.0.0/24"
       ],
       "tags": [
         "router",
@@ -43,15 +48,16 @@
       ]
     },
     {
-      "id": "google-nest",
-      "displayName": "Google Nest Router / Mesh",
+      "id": "upstream-router",
+      "displayName": "Upstream Router",
       "deviceType": "Router",
+      "//": "A router known only by the range it serves needs no fixed address.",
       "knownSubnets": [
         "192.168.87.0/24"
       ],
       "tags": [
         "router",
-        "mesh"
+        "upstream"
       ]
     }
   ]

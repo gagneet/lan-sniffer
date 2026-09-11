@@ -51,6 +51,7 @@ public partial class App : Application
             Path.Combine(dataDirectory, "known-devices.local.json"),
             Path.Combine(userConfigDirectory, "known-devices.json"),
             Path.Combine(userConfigDirectory, "known-devices.local.json"));
+
         var localNetworkProvider = new LocalNetworkProfileProvider();
 
         var tailscale = new TailscaleCliService();
@@ -114,6 +115,26 @@ public partial class App : Application
             deviceLocator,
             nameRegistry,
             dnsService);
+
+        // Editing devices in the app writes to the per-user configuration, never to the copy
+        // shipped beside the executable, which an update would overwrite.
+        var searchPaths = new[]
+        {
+            Path.Combine(dataDirectory, "known-devices.json"),
+            Path.Combine(dataDirectory, "known-devices.local.json"),
+            Path.Combine(userConfigDirectory, "known-devices.json"),
+            Path.Combine(userConfigDirectory, "known-devices.local.json")
+        };
+
+        viewModel.AttachSettingsTab(new SettingsTabViewModel(
+            knownDevices,
+            searchPaths,
+            () =>
+            {
+                var reloaded = KnownDevicesConfiguration.LoadMany(searchPaths);
+                nameRegistry.Invalidate();
+                viewModel.ReloadKnownDevices(reloaded.KnownDevices);
+            }));
 
         var mainWindow = new MainWindow(viewModel);
         mainWindow.Show();

@@ -136,6 +136,10 @@ No SSH passwords are stored. Authentication uses your local SSH keys, `ssh-agent
 
 ## Known Device Config
 
+LanInspector ships with **no devices configured**. Add your own in the **Settings** tab, which
+writes to your per-user configuration — see [Configuring Your Devices](docs/configuring-your-devices.md).
+
+
 Create `known-devices.json` in the current directory, `~/.config/laninspector/`, or the executable directory:
 
 ```json
@@ -203,6 +207,35 @@ Pi-hole example:
 }
 ```
 
+## Whole-Network Traffic
+
+The Traffic tab shows what **this machine** can see, which on a switched network is its own traffic
+plus broadcast and multicast. A switch does not forward one device's unicast frames to another
+port, so promiscuous mode does not reveal a conversation between two other devices. Seeing all of
+it needs one of:
+
+| Approach | Needs | Gives |
+|---|---|---|
+| **Router interface counters (SNMP)** | SNMP enabled on the router | Total throughput per interface, including the WAN — every device's traffic combined |
+| **Port mirroring / SPAN** | A managed switch | Full packet visibility for mirrored ports |
+| **Run the capture on the router** | Custom firmware (OpenWrt and similar) | Full visibility, on supported hardware only |
+
+The first is the realistic one for consumer gear. Check whether your router supports it:
+
+```bash
+laninspector snmp 192.168.0.1 --throughput 10
+```
+
+```text
+Interface                            Down           Up   Utilisation
+wan                              4.21 MB/s    412 KB/s   3.4%
+lan1                             1.02 MB/s   1.98 MB/s   1.6%
+```
+
+If it reports that counters could not be read, the router does not expose SNMP (common on consumer
+units) or the community string differs. Per-device breakdown is not available this way — interface
+counters are totals — and needs a managed switch or router-side capture.
+
 ## Traffic View
 
 The **Traffic** tab aggregates captured packets into throughput over time and per-host totals.
@@ -217,8 +250,11 @@ The **Traffic** tab aggregates captured packets into throughput over time and pe
   device whose lease moved), a hostname seen in the capture, this machine's own interfaces and
   gateway, tailnet peer names for `100.x` addresses, and hostnames learned from DNS and mDNS
   answers — which is what labels external addresses the LAN has no other name for.
-- **Drill-down** — select a host and the chart, the flow list and the peer list all narrow to that
-  address. "Show all hosts" returns to the whole-network view.
+- **Drill-down by host** — select a host and the chart, the flow list and the peer list all narrow
+  to that address. "Show all hosts" returns to the whole-network view.
+- **Drill-down by moment** — click a bar to see the conversations that made up that second or
+  minute. Click it again to clear. Attribution is capped per bucket and says so when it truncates,
+  rather than quietly under-reporting.
 - Quiet periods are zero-filled rather than compressed away, so the bars line up with wall-clock
   time and a gap in traffic looks like a gap.
 
@@ -373,5 +409,6 @@ LanInspector explains this in plain English: the Eero route does not know how to
 
 - [User Guide](docs/user-guide.md)
 - [Tracking a Server Whose IP Keeps Changing](docs/tracking-a-moving-server-ip.md)
+- [Configuring Your Devices](docs/configuring-your-devices.md)
 - [Next Phase: Topology, Traffic, DNS and Integrations](docs/next-phase-topology-traffic-dns-integrations.md)
 - [Cross-platform CLI and Remote Access Prompt](docs/next-phase-cross-platform-cli-remote-access.md)

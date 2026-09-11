@@ -112,6 +112,25 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public TopologyTabViewModel TopologyTab { get; }
     public TrafficTabViewModel TrafficTab { get; }
     public DnsTabViewModel DnsTab { get; }
+    public SettingsTabViewModel? SettingsTab { get; private set; }
+
+    /// <summary>
+    /// Rebuilds the critical-device list from a freshly saved configuration, so an edit in the
+    /// Settings tab takes effect without restarting the application.
+    /// </summary>
+    public void ReloadKnownDevices(IReadOnlyList<KnownDeviceDefinition> knownDevices)
+    {
+        CriticalDevices.Clear();
+        foreach (var knownDevice in knownDevices.Where(device => device.IsCritical || device.Ssh?.Enabled == true))
+        {
+            CriticalDevices.Add(new CriticalDeviceViewModel(knownDevice));
+        }
+
+        SelectedCriticalDevice = null;
+        _ = RefreshCriticalDevicesAsync();
+    }
+
+    public void AttachSettingsTab(SettingsTabViewModel settingsTab) => SettingsTab = settingsTab;
 
     public ObservableCollection<CaptureDeviceInfo> Interfaces { get; } = [];
 
@@ -638,7 +657,17 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         var isOnline = location.Confidence == LocationConfidence.Confirmed;
         var status = isOnline ? "Online" : location.Confidence == LocationConfidence.Low ? "Not reachable" : "Probable";
 
-        criticalDevice.ApplyLocation(location, status, route.RouteSummary);
+        // "Not reachable" alone sends people hunting for a fault on the target; the usual cause is
+        // that this machine is on a different subnet with no route to it.
+        var diagnosis = ReachabilityExplainer.Explain(
+            location.CurrentAddress,
+            _reachabilityClassifier.GetCurrentProfile(),
+            route,
+            isOnline,
+            location.TailscaleAddress,
+            location.TailscaleName);
+
+        criticalDevice.ApplyLocation(location, status, route.RouteSummary, diagnosis);
         return isOnline;
     }
 
