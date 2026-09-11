@@ -369,7 +369,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             catch (Exception ex)
             {
                 Debug.WriteLine($"Critical device refresh failed for {criticalDevice.DisplayName}: {ex}");
-                criticalDevice.Update("Check failed", criticalDevice.CurrentIp, ex.Message);
+                criticalDevice.ApplyCheckFailure(ex.Message);
             }
         }
 
@@ -645,11 +645,20 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         if (location.CurrentAddress is null)
         {
-            var offlineSummary = location.TailscaleAddress is not null
-                ? $"No LAN address found; reachable over Tailscale at {location.TailscaleAddress}."
-                : "No LAN address found.";
+            var notFound = location.TailscaleAddress is not null
+                ? new ReachabilityDiagnosis(
+                    ReachabilityCause.DifferentSubnet,
+                    "no LAN address",
+                    $"No address for this device could be found on any network this machine can see." +
+                    $" Tailscale reaches it now at {location.TailscaleName ?? location.TailscaleAddress.ToString()}.",
+                    "Add a MAC address for it so the ARP cache can identify it wherever it moves.")
+                : new ReachabilityDiagnosis(
+                    ReachabilityCause.DifferentSubnet,
+                    "no LAN address",
+                    "No address for this device could be found on any network this machine can see.",
+                    "Add a MAC address or hostname for it, or check it is powered on.");
 
-            criticalDevice.ApplyLocation(location, "Not found", offlineSummary);
+            criticalDevice.ApplyLocation(location, "Not found", isOnline: false, string.Empty, notFound);
             return false;
         }
 
@@ -667,8 +676,30 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             location.TailscaleAddress,
             location.TailscaleName);
 
-        criticalDevice.ApplyLocation(location, status, route.RouteSummary, diagnosis);
+        criticalDevice.ApplyLocation(location, status, isOnline, route.RouteSummary, diagnosis);
         return isOnline;
+    }
+
+    /// <summary>
+    /// Opens one device's explanation and closes any other. Two open at once would push the list
+    /// back into the scrolling this layout exists to avoid.
+    /// </summary>
+    [RelayCommand]
+    private void ToggleCriticalDeviceExpansion(CriticalDeviceViewModel? device)
+    {
+        if (device is null || !device.HasDiagnosis)
+        {
+            return;
+        }
+
+        var wasExpanded = device.IsExpanded;
+
+        foreach (var other in CriticalDevices)
+        {
+            other.IsExpanded = false;
+        }
+
+        device.IsExpanded = !wasExpanded;
     }
 
     private void QueueRouteRefresh(DeviceRowViewModel row)

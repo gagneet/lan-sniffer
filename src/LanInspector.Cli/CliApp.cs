@@ -69,7 +69,7 @@ internal static class CliApp
 
             case "locate":
             case "whereis":
-                await RunLocateAsync(rest, knownDevices, tailscale, ct);
+                await RunLocateAsync(rest, knownDevices, routeDiag, tailscale, ct);
                 break;
 
             case "check":
@@ -248,6 +248,7 @@ internal static class CliApp
     private static async Task RunLocateAsync(
         string[] args,
         IReadOnlyList<KnownDeviceDefinition> knownDevices,
+        IRouteDiagnosticsService routeDiag,
         ITailscaleService tailscale,
         CancellationToken ct)
     {
@@ -302,6 +303,8 @@ internal static class CliApp
             return;
         }
 
+        var profile = new LocalNetworkProfileProvider().GetCurrentProfile();
+
         Console.WriteLine("LanInspector Device Locator");
         Console.WriteLine(new string('-', 60));
         if (!probe)
@@ -332,6 +335,25 @@ internal static class CliApp
             {
                 var changed = location.AddressChangedAt is null ? "" : $" at {location.AddressChangedAt:u}";
                 Console.WriteLine($"  Changed        : was {location.PreviousAddress}{changed}");
+            }
+
+            // "Confidence: Low" on its own sends people hunting for a fault on the target. The usual
+            // cause on a multi-router home network is that this machine has no route to it at all.
+            if (location.CurrentAddress is not null && location.Confidence != LocationConfidence.Confirmed)
+            {
+                var route = await routeDiag.GetRouteToAsync(location.CurrentAddress, ct);
+                var diagnosis = ReachabilityExplainer.Explain(
+                    location.CurrentAddress,
+                    profile,
+                    route,
+                    serviceAnswered: false,
+                    location.TailscaleAddress,
+                    location.TailscaleName);
+
+                if (diagnosis.HasDiagnosis)
+                {
+                    Console.WriteLine($"  Why            : {diagnosis.ShortCause} - {diagnosis.ToSingleLine()}");
+                }
             }
 
             if (location.Candidates.Count > 0)

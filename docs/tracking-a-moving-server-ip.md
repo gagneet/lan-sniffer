@@ -286,13 +286,35 @@ FAST5366LTE-A, which the Eero has no route into. Nothing is wrong with the serve
 no path from that side of the house to that subnet. Tailscale still works because it does not use
 that path at all.
 
-The critical-devices panel now says so rather than leaving "Not reachable" to be interpreted:
+The critical-devices panel now says so rather than leaving "Not reachable" to be interpreted. The
+row itself carries only the short cause, because a row has space for two or three words and a
+paragraph pressed into it would push the address out of view — which is the problem this layout was
+rebuilt to fix:
+
+```text
+Device                LAN address       Tailscale          Status
+Home Server           192.168.0.148     100.83.183.74      [ Not reachable ]   v
+  ARP cache, by MAC   Low               reachable this way   different subnet
+```
+
+Clicking the chevron opens the full account underneath, and only one row opens at a time:
 
 ```text
 This machine is on 192.168.87.0/24; 192.168.0.148 is on 192.168.0.0/24. Those are different
-subnets, and the router between them does not carry traffic from this side to that one. Connect
-to the same network as the target, add a route, or reach it over Tailscale.
+subnets, and the router between them does not carry traffic from this side to that one.
 Tailscale reaches it now at ubuntu-svr.
+
+Connect to the same network as the target, add a route, or reach it over Tailscale.
+```
+
+The CLI has no room for structure, so `locate` prints the same thing on one line:
+
+```text
+  Current LAN IP : 192.168.0.148
+  Confidence     : Low
+  Why            : different subnet - This machine is on 192.168.87.0/24; 192.168.0.148 is on
+                   192.168.0.0/24. ... Connect to the same network as the target, add a route,
+                   or reach it over Tailscale.
 ```
 
 When the target *is* on the same subnet and still does not answer, the message says the opposite —
