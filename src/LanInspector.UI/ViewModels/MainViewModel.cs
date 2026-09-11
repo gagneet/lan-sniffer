@@ -104,7 +104,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         RefreshNetworkSummary();
         StatusText = _vendorLookup.Count > 0
             ? $"Loaded {_vendorLookup.Count} OUI vendor prefix(es)."
-            : "Ready. Add more vendor prefixes to Data/oui.csv for richer vendor names.";
+            : "Ready. Place a Data/oui.csv next to the executable to add vendor prefixes.";
         RefreshInterfaces();
         _ = RefreshCriticalDevicesAsync();
     }

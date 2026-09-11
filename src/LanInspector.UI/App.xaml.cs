@@ -36,7 +36,10 @@ public partial class App : Application
             new DhcpAnalyzer(devices)
         };
 
+        // The built-in list travels inside the executable; a Data\oui.csv placed beside it is an
+        // optional addition, loaded second so a user's own entries win.
         var vendorLookup = new OuiVendorLookup();
+        vendorLookup.LoadBuiltIn();
         vendorLookup.LoadCsv(Path.Combine(AppContext.BaseDirectory, "Data", "oui.csv"));
 
         var dataDirectory = Path.Combine(AppContext.BaseDirectory, "Data");

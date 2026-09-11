@@ -79,6 +79,7 @@ foreach ($rid in @("win-x64", "linux-x64", "osx-x64", "osx-arm64")) {
         -r $rid `
         --self-contained true `
         -p:PublishSingleFile=true `
+        -p:IncludeNativeLibrariesForSelfExtract=true `
         -p:SourceRevisionId=$revision `
         -o $output
 

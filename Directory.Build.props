@@ -10,5 +10,9 @@
          which is what makes a stale executable obvious instead of silently missing features. -->
     <Version>0.6.0</Version>
     <Product>LanInspector</Product>
+
+    <!-- Symbols inside the assembly rather than as loose .pdb files, so a published build is a
+         single portable executable with nothing to leave behind when it is copied. -->
+    <DebugType>embedded</DebugType>
   </PropertyGroup>
 </Project>

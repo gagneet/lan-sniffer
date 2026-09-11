@@ -96,6 +96,26 @@ public sealed partial class SettingsTabViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private void WriteExampleConfig()
+    {
+        try
+        {
+            var directory = Path.GetDirectoryName(UserConfigPath);
+            if (string.IsNullOrEmpty(directory))
+            {
+                return;
+            }
+
+            var path = KnownDevicesConfiguration.WriteExampleTo(directory);
+            StatusText = $"Example configuration is at {path}. It is never loaded — copy the parts you want.";
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Could not write the example: {ex.Message}";
+        }
+    }
+
+    [RelayCommand]
     private void OpenConfigFolder()
     {
         try

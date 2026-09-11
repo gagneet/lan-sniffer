@@ -332,6 +332,11 @@ self-contained single-file executables, and zips each one:
 
 `-SkipTests` publishes without testing first; `-CliOnly` skips the desktop application.
 
+Each folder holds **exactly one file**. The vendor list and the example configuration are compiled
+into the assembly and debug symbols are embedded, so `LanInspector.UI.exe` can be copied to another
+machine on its own and will work — no `Data` folder, no `.pdb` files. Dropping a `Data\oui.csv`
+next to the executable still adds vendor prefixes to the built-in list if you want more of them.
+
 ### Check what you are running
 
 Every binary is stamped with the commit it was built from:
@@ -460,5 +465,6 @@ LanInspector explains this in plain English: the Eero route does not know how to
 - [User Guide](docs/user-guide.md)
 - [Tracking a Server Whose IP Keeps Changing](docs/tracking-a-moving-server-ip.md)
 - [Configuring Your Devices](docs/configuring-your-devices.md)
+- [Flattening a Multi-Router Home Network](docs/network-topology-recommendations.md)
 - [Next Phase: Topology, Traffic, DNS and Integrations](docs/next-phase-topology-traffic-dns-integrations.md)
 - [Cross-platform CLI and Remote Access Prompt](docs/next-phase-cross-platform-cli-remote-access.md)

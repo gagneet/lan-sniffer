@@ -64,6 +64,42 @@ public sealed class KnownDevicesConfiguration
     }
 
     /// <summary>
+    /// The example configuration compiled into the assembly, for writing out as a starting point.
+    /// It is embedded rather than shipped as a file so the application stays a single portable
+    /// executable.
+    /// </summary>
+    public static string GetExampleJson()
+    {
+        using var stream = typeof(KnownDevicesConfiguration).Assembly
+            .GetManifestResourceStream("LanInspector.Core.Data.known-devices.example.json");
+
+        if (stream is null)
+        {
+            return "{\n  \"knownDevices\": []\n}";
+        }
+
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+
+    /// <summary>
+    /// Writes the example configuration next to the user's own, without overwriting anything.
+    /// </summary>
+    /// <returns>The path written, or the existing path when one was already there.</returns>
+    public static string WriteExampleTo(string directory)
+    {
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, "known-devices.example.json");
+
+        if (!File.Exists(path))
+        {
+            File.WriteAllText(path, GetExampleJson());
+        }
+
+        return path;
+    }
+
+    /// <summary>
     /// Where user edits are saved: per-user configuration, never the copy shipped with the
     /// application, which an update would overwrite.
     /// </summary>

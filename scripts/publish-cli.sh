@@ -15,6 +15,7 @@ for rid in "${rids[@]}"; do
         -r "$rid" \
         --self-contained true \
         -p:PublishSingleFile=true \
+        -p:IncludeNativeLibrariesForSelfExtract=true \
         -o "$output"
 
     zip_file="$output.zip"

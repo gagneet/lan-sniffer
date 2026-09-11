@@ -640,6 +640,7 @@
                                     <Button Content="Remove selected" Command="{Binding RemoveDeviceCommand}" Margin="6,0,0,0" />
                                     <Button Content="Save" Command="{Binding SaveCommand}" Margin="18,0,0,0" Padding="14,2" FontWeight="SemiBold" />
                                     <Button Content="Open config folder" Command="{Binding OpenConfigFolderCommand}" Margin="6,0,0,0" />
+                                    <Button Content="Write example file" Command="{Binding WriteExampleConfigCommand}" Margin="6,0,0,0" />
                                 </StackPanel>
                                 <TextBlock Text="{Binding StatusText}" Foreground="#405162" TextWrapping="Wrap" Margin="0,8,0,0" />
                             </StackPanel>
