@@ -1,4 +1,6 @@
 {
+  "//": "Copy to known-devices.local.json and edit. Files are merged by id, later files win.",
+  "//knownMacs": "Best way to track a device across DHCP changes: the MAC does not change when the lease does.",
   "knownDevices": [
     {
       "id": "home-server",
@@ -7,6 +9,12 @@
       "knownIps": [
         "192.168.0.148",
         "192.168.87.243"
+      ],
+      "knownMacs": [
+        "00:11:22:33:44:55"
+      ],
+      "knownHostnames": [
+        "your-server-hostname"
       ],
       "knownTailscaleNames": [
         "home-server",

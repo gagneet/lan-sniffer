@@ -2,13 +2,19 @@
   "knownDevices": [
     {
       "id": "home-server",
-      "displayName": "Home Server",
+      "displayName": "Home Server (ubuntu-svr)",
       "deviceType": "Server",
       "knownIps": [
+        "192.168.0.154",
         "192.168.0.148",
         "192.168.87.243"
       ],
+      "knownMacs": [],
+      "knownHostnames": [
+        "ubuntu-svr"
+      ],
       "knownTailscaleNames": [
+        "ubuntu-svr",
         "home-server",
         "homeserver"
       ],
@@ -28,6 +34,9 @@
       "deviceType": "Router",
       "knownIps": [
         "192.168.0.1"
+      ],
+      "knownSubnets": [
+        "192.168.0.0/24"
       ],
       "tags": [
         "optus",
@@ -53,7 +62,12 @@
       "id": "eero-main",
       "displayName": "Eero Main Router",
       "deviceType": "Router",
+      "knownIps": [
+        "192.168.87.1",
+        "192.168.4.1"
+      ],
       "knownSubnets": [
+        "192.168.87.0/24",
         "192.168.4.0/24"
       ],
       "tags": [

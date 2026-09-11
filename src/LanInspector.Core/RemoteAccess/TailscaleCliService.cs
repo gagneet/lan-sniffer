@@ -1,87 +1,48 @@
 using System.Net;
-using System.Text.Json;
 using LanInspector.Core.Diagnostics;
 
 namespace LanInspector.Core.RemoteAccess;
 
 public sealed class TailscaleCliService : ITailscaleService
 {
+    private static string ExecutableName => OperatingSystem.IsWindows() ? "tailscale.exe" : "tailscale";
+
     public async Task<TailscaleStatus> GetStatusAsync(CancellationToken cancellationToken = default)
     {
-        var tailscaleBin = OperatingSystem.IsWindows() ? "tailscale.exe" : "tailscale";
-        var version = await ProcessHelper.RunAsync(tailscaleBin, "version", TimeSpan.FromSeconds(5), cancellationToken);
-        if (string.IsNullOrWhiteSpace(version) || version.StartsWith("Error", StringComparison.OrdinalIgnoreCase))
+        // Whether the binary exists is decided by whether the process launched, not by what it
+        // printed. Matching on the text of an error message reported a missing tailscale as
+        // "installed but not connected", which sends the user to `tailscale up` when what they
+        // actually need is to install it.
+        var version = await ProcessHelper.TryRunAsync(ExecutableName, "version", TimeSpan.FromSeconds(5), cancellationToken);
+        if (!version.Started)
         {
             return new TailscaleStatus(TailscaleConnectionState.NotInstalled, [], []);
         }
 
-        var statusJson = await ProcessHelper.RunAsync(tailscaleBin, "status --json", TimeSpan.FromSeconds(10), cancellationToken);
-        if (string.IsNullOrWhiteSpace(statusJson))
+        var status = await ProcessHelper.TryRunAsync(ExecutableName, "status --json", TimeSpan.FromSeconds(10), cancellationToken);
+        if (!status.Started || string.IsNullOrWhiteSpace(status.StandardOutput))
         {
             return new TailscaleStatus(TailscaleConnectionState.InstalledNotConnected, [], []);
         }
 
-        return ParseStatusJson(statusJson);
+        return TailscaleStatusParser.Parse(status.StandardOutput);
     }
 
-    private static TailscaleStatus ParseStatusJson(string json)
+    public async Task<IPEndPoint?> TryGetDirectEndpointAsync(string target, CancellationToken cancellationToken = default)
     {
-        try
+        if (string.IsNullOrWhiteSpace(target))
         {
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-
-            var backendState = root.TryGetProperty("BackendState", out var stateEl) ? stateEl.GetString() : null;
-            if (!string.Equals(backendState, "Running", StringComparison.OrdinalIgnoreCase))
-            {
-                return new TailscaleStatus(TailscaleConnectionState.InstalledNotConnected, [], []);
-            }
-
-            var selfName = string.Empty;
-            var localIps = new List<IPAddress>();
-            if (root.TryGetProperty("Self", out var selfEl))
-            {
-                selfName = selfEl.TryGetProperty("HostName", out var hn) ? hn.GetString() ?? string.Empty : string.Empty;
-                localIps.AddRange(ParseIpArray(selfEl, "TailscaleIPs"));
-            }
-
-            var peers = new List<TailscaleDevice>();
-            if (root.TryGetProperty("Peer", out var peersEl))
-            {
-                foreach (var peer in peersEl.EnumerateObject())
-                {
-                    var hostname = peer.Value.TryGetProperty("HostName", out var hn) ? hn.GetString() ?? string.Empty : string.Empty;
-                    var dnsName = peer.Value.TryGetProperty("DNSName", out var dn) ? dn.GetString()?.TrimEnd('.') ?? string.Empty : string.Empty;
-                    var online = peer.Value.TryGetProperty("Online", out var ol) && ol.GetBoolean();
-                    var peerIps = ParseIpArray(peer.Value, "TailscaleIPs");
-                    peers.Add(new TailscaleDevice(hostname, dnsName, peerIps, online));
-                }
-            }
-
-            return new TailscaleStatus(TailscaleConnectionState.Connected, peers, localIps, selfName);
-        }
-        catch
-        {
-            return new TailscaleStatus(TailscaleConnectionState.InstalledNotConnected, [], []);
-        }
-    }
-
-    private static List<IPAddress> ParseIpArray(JsonElement element, string propertyName)
-    {
-        var result = new List<IPAddress>();
-        if (!element.TryGetProperty(propertyName, out var arrayEl))
-        {
-            return result;
+            return null;
         }
 
-        foreach (var item in arrayEl.EnumerateArray())
-        {
-            if (IPAddress.TryParse(item.GetString(), out var parsed))
-            {
-                result.Add(parsed);
-            }
-        }
+        // --until-direct makes tailscale keep probing until a peer-to-peer path is up rather
+        // than stopping at the first DERP-relayed reply, which carries no LAN address.
+        var output = await ProcessHelper.RunAsync(
+            ExecutableName,
+            $"ping --c 5 --timeout 2s --until-direct \"{target}\"",
+            TimeSpan.FromSeconds(15),
+            cancellationToken);
 
-        return result;
+        return TailscalePingParser.TryParseDirectEndpoint(output);
     }
 }

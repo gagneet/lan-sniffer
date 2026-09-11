@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  LanInspector mark: a magnifier over a hub-and-spoke network.
+  Geometry mirrors scripts/generate-logo.py, which renders the PNG and ICO from the same shapes.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="LanInspector">
+  <title>LanInspector</title>
+  <defs>
+    <linearGradient id="backdrop" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#17212B"/>
+      <stop offset="1" stop-color="#1A344E"/>
+    </linearGradient>
+    <clipPath id="tile">
+      <rect x="0" y="0" width="1024" height="1024" rx="200" ry="200"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#tile)">
+    <rect x="0" y="0" width="1024" height="1024" fill="url(#backdrop)"/>
+
+    <!-- Handle, drawn first so the rim overlaps it. -->
+    <line x1="597.7" y1="577.7" x2="838.7" y2="818.7"
+          stroke="#4FA3F0" stroke-width="84" stroke-linecap="round"/>
+
+    <!-- Lens glass and rim. -->
+    <circle cx="430" cy="410" r="248" fill="#10283E"/>
+    <circle cx="430" cy="410" r="221" fill="none" stroke="#4FA3F0" stroke-width="54"/>
+
+    <!-- The network under the glass: one hub, three leaves. -->
+    <g stroke="#5B87B5" stroke-width="20" stroke-linecap="round">
+      <line x1="430" y1="410" x2="430.0" y2="278.0"/>
+      <line x1="430" y1="410" x2="538.1" y2="485.7"/>
+      <line x1="430" y1="410" x2="306.0" y2="455.2"/>
+    </g>
+    <g fill="#DEE9F3">
+      <circle cx="430.0" cy="278.0" r="33"/>
+      <circle cx="538.1" cy="485.7" r="33"/>
+      <circle cx="306.0" cy="455.2" r="33"/>
+    </g>
+    <circle cx="430" cy="410" r="50" fill="#7FD4FF"/>
+  </g>
+</svg>

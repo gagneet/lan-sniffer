@@ -4,7 +4,15 @@
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <ApplicationIcon>Assets\laninspector.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Resource (not Content) so the window icon and header art are embedded in the single-file
+         executable rather than needing to sit next to it. -->
+    <Resource Include="Assets\laninspector.ico" />
+    <Resource Include="Assets\laninspector-logo.png" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />

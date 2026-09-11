@@ -10,6 +10,7 @@ using LanInspector.Core.Configuration;
 using LanInspector.Core.Diagnostics;
 using LanInspector.Core.Dns;
 using LanInspector.Core.Identity;
+using LanInspector.Core.Locator;
 using LanInspector.Core.Model;
 using LanInspector.Core.Network;
 using LanInspector.Core.RemoteAccess;
@@ -31,6 +32,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly IRouteDiagnosticsService _routeDiagnostics;
     private readonly ReachabilityClassifier _reachabilityClassifier;
     private readonly ITerminalLauncher _terminalLauncher;
+    private readonly IDeviceLocatorService _deviceLocator;
     private readonly Action _clearDeviceStore;
     private readonly Action<Action> _dispatchToUi;
     private readonly TrafficFlowService _trafficFlowService = new();
@@ -60,6 +62,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         Action<Action> dispatchToUi,
         ITailscaleService tailscale,
         KnownDevicesConfiguration knownDevicesConfig,
+        IDeviceLocatorService deviceLocator,
         IDnsFilterService? dnsFilterService = null)
     {
         _captureProvider = captureProvider;
@@ -71,6 +74,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _routeDiagnostics = routeDiagnostics;
         _reachabilityClassifier = reachabilityClassifier;
         _terminalLauncher = terminalLauncher;
+        _deviceLocator = deviceLocator;
         _clearDeviceStore = clearDeviceStore;
         _dispatchToUi = dispatchToUi;
         _trafficFlowAnalyzer = new TrafficFlowAnalyzer(_trafficFlowService);
@@ -151,6 +155,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(CopyCriticalSshCommandCommand))]
     [NotifyCanExecuteChangedFor(nameof(OpenCriticalSshCommand))]
+    [NotifyCanExecuteChangedFor(nameof(CopyCriticalIpCommand))]
     private CriticalDeviceViewModel? _selectedCriticalDevice;
 
     [ObservableProperty]
@@ -440,6 +445,21 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     private bool CanOpenCriticalSsh() => !string.IsNullOrWhiteSpace(SelectedCriticalDevice?.SshCommand);
 
+    [RelayCommand(CanExecute = nameof(CanCopyCriticalIp))]
+    private void CopyCriticalIp()
+    {
+        var address = SelectedCriticalDevice?.CurrentIp;
+        if (string.IsNullOrWhiteSpace(address))
+        {
+            return;
+        }
+
+        Clipboard.SetText(address);
+        StatusText = $"Copied {SelectedCriticalDevice!.DisplayName} address: {address}";
+    }
+
+    private bool CanCopyCriticalIp() => !string.IsNullOrWhiteSpace(SelectedCriticalDevice?.CurrentIp);
+
     public void Dispose()
     {
         if (_disposed)
@@ -520,11 +540,20 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _ = TryReverseDnsAsync(device);
     }
 
+    /// <summary>
+    /// Labels a captured device with its configured identity. MAC and hostname are checked before
+    /// the configured IP list, because the IP is the one attribute that changes when the DHCP
+    /// lease is renewed — matching on it alone loses the device exactly when it moves.
+    /// </summary>
     private void ApplyKnownDeviceIdentity(Device device)
     {
         var ips = device.IpAddresses.ToArray();
-        var knownDevice = _knownDevices.FirstOrDefault(candidate =>
-            candidate.KnownIps.Any(ip => ips.Contains(ip, StringComparer.OrdinalIgnoreCase)));
+        var names = device.ObservedNames.Append(device.Hostname).Where(name => name is not null).ToArray();
+
+        var knownDevice = _knownDevices.FirstOrDefault(candidate => candidate.MatchesMac(device.MacAddress))
+            ?? _knownDevices.FirstOrDefault(candidate => names.Any(candidate.MatchesHostname))
+            ?? _knownDevices.FirstOrDefault(candidate =>
+                candidate.KnownIps.Any(ip => ips.Contains(ip, StringComparer.OrdinalIgnoreCase)));
 
         if (knownDevice is null)
         {
@@ -582,36 +611,34 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>
+    /// Locates a critical device and reports where it actually is, rather than only testing the
+    /// addresses written in the config. On a network where the router hands out a new lease after
+    /// every power cycle, the configured address is stale more often than not.
+    /// </summary>
     private async Task<bool> RefreshCriticalDeviceAsync(CriticalDeviceViewModel criticalDevice)
     {
-        var candidates = criticalDevice.Definition.KnownIps
-            .Select(ip => IPAddress.TryParse(ip, out var parsed) ? parsed : null)
-            .Where(ip => ip is not null)
-            .Cast<IPAddress>()
-            .ToArray();
+        var location = await _deviceLocator.LocateAsync(
+            criticalDevice.Definition,
+            DeviceLocatorOptions.Default,
+            _shutdownCancellation.Token);
 
-        foreach (var candidate in candidates)
+        if (location.CurrentAddress is null)
         {
-            var route = await _routeDiagnostics.GetRouteToAsync(candidate, _shutdownCancellation.Token);
-            var port = criticalDevice.Definition.Ssh?.Enabled == true
-                ? await _routeDiagnostics.TestPortAsync(candidate, criticalDevice.Definition.Ssh.Port, "SSH", _shutdownCancellation.Token)
-                : new PortReachability(candidate, 0, false, string.Empty);
+            var offlineSummary = location.TailscaleAddress is not null
+                ? $"No LAN address found; reachable over Tailscale at {location.TailscaleAddress}."
+                : "No LAN address found.";
 
-            if (port.IsOpen)
-            {
-                criticalDevice.Update("Online", candidate.ToString(), route.RouteSummary);
-                return true;
-            }
+            criticalDevice.ApplyLocation(location, "Not found", offlineSummary);
+            return false;
         }
 
-        var fallback = candidates.FirstOrDefault();
-        if (fallback is not null)
-        {
-            var route = await _routeDiagnostics.GetRouteToAsync(fallback, _shutdownCancellation.Token);
-            criticalDevice.Update("Not reachable", fallback.ToString(), route.RouteSummary);
-        }
+        var route = await _routeDiagnostics.GetRouteToAsync(location.CurrentAddress, _shutdownCancellation.Token);
+        var isOnline = location.Confidence == LocationConfidence.Confirmed;
+        var status = isOnline ? "Online" : location.Confidence == LocationConfidence.Low ? "Not reachable" : "Probable";
 
-        return false;
+        criticalDevice.ApplyLocation(location, status, route.RouteSummary);
+        return isOnline;
     }
 
     private void QueueRouteRefresh(DeviceRowViewModel row)

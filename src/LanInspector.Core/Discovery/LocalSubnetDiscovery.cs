@@ -34,8 +34,10 @@ public sealed class LocalSubnetDiscovery : INetworkDiscovery
 
             try
             {
-                var reply = await ping.SendPingAsync(ip, 500);
-                if (reply.Status != IPStatus.Success || token.IsCancellationRequested)
+                // Passing the token aborts in-flight probes on cancellation; without it a sweep of
+                // a large subnet keeps running for its full duration after the caller gives up.
+                var reply = await ping.SendPingAsync(ip, TimeSpan.FromMilliseconds(500), cancellationToken: token);
+                if (reply.Status != IPStatus.Success)
                 {
                     return;
                 }
@@ -48,6 +50,10 @@ public sealed class LocalSubnetDiscovery : INetworkDiscovery
             catch (PingException)
             {
                 // Some hosts block ICMP or transiently reject probes.
+            }
+            catch (OperationCanceledException)
+            {
+                // Sweep cancelled by the caller.
             }
         });
 

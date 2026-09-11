@@ -88,3 +88,63 @@ public sealed class KnownDeviceMatchingTests
         Assert.Empty(config.KnownDevices);
     }
 }
+
+public sealed class KnownDeviceIdentityTests
+{
+    private static readonly KnownDeviceDefinition HomeServer = new()
+    {
+        Id = "home-server",
+        DisplayName = "Home Server",
+        KnownMacs = ["9c:6b:00:aa:bb:cc"],
+        KnownHostnames = ["ubuntu-svr"],
+        KnownTailscaleNames = ["ubuntu-svr.tail7f7c1e.ts.net"]
+    };
+
+    [Theory]
+    [InlineData("9C6B00AABBCC")]
+    [InlineData("9c:6b:00:aa:bb:cc")]
+    [InlineData("9C-6B-00-AA-BB-CC")]
+    [InlineData("9c:6b:0:aa:bb:cc")]
+    public void MatchesMac_AcceptsEveryNotation(string mac)
+    {
+        Assert.True(HomeServer.MatchesMac(mac));
+    }
+
+    [Theory]
+    [InlineData("9C6B00AABBCD")]
+    [InlineData("not-a-mac")]
+    [InlineData("")]
+    [InlineData(null)]
+    public void MatchesMac_RejectsOtherDevices(string? mac)
+    {
+        Assert.False(HomeServer.MatchesMac(mac));
+    }
+
+    [Theory]
+    [InlineData("ubuntu-svr")]
+    [InlineData("UBUNTU-SVR")]
+    [InlineData("ubuntu-svr.local")]
+    [InlineData("ubuntu-svr.tail7f7c1e.ts.net")]
+    [InlineData("ubuntu-svr.tail7f7c1e.ts.net.")]
+    public void MatchesHostname_MatchesShortAndQualifiedForms(string hostname)
+    {
+        Assert.True(HomeServer.MatchesHostname(hostname));
+    }
+
+    [Theory]
+    [InlineData("other-host")]
+    [InlineData("")]
+    [InlineData(null)]
+    public void MatchesHostname_RejectsOtherNames(string? hostname)
+    {
+        Assert.False(HomeServer.MatchesHostname(hostname));
+    }
+
+    [Fact]
+    public void NormalisedMacs_DropsUnparseableEntries()
+    {
+        var device = new KnownDeviceDefinition { Id = "x", KnownMacs = ["9c:6b:00:aa:bb:cc", "junk", ""] };
+
+        Assert.Equal(["9C6B00AABBCC"], device.NormalisedMacs);
+    }
+}

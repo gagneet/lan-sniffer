@@ -77,6 +77,18 @@ public sealed class KnownDeviceDefinition
 
     public List<string> KnownTailscaleNames { get; init; } = [];
 
+    /// <summary>
+    /// MAC addresses belonging to this device, in any common notation. A MAC survives DHCP
+    /// lease changes, so it is the most reliable way to re-find a device that moved IP.
+    /// </summary>
+    public List<string> KnownMacs { get; init; } = [];
+
+    /// <summary>
+    /// Hostnames this device answers to (DNS, MagicDNS or mDNS). Used as a fallback when the
+    /// device is on a different layer-2 segment and its MAC is therefore not in the ARP table.
+    /// </summary>
+    public List<string> KnownHostnames { get; init; } = [];
+
     public string? ExpectedVendor { get; init; }
 
     public KnownDeviceSshOptions? Ssh { get; init; }
@@ -85,6 +97,44 @@ public sealed class KnownDeviceDefinition
 
     [JsonIgnore]
     public bool IsCritical => Tags.Any(tag => string.Equals(tag, "critical", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Normalised (hex-only, upper-case) forms of <see cref="KnownMacs"/> for comparison.
+    /// </summary>
+    [JsonIgnore]
+    public IReadOnlyCollection<string> NormalisedMacs =>
+        KnownMacs.Select(MacAddressFormatter.Normalise)
+            .Where(mac => mac.Length == 12)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    public bool MatchesMac(string? macAddress)
+    {
+        if (string.IsNullOrWhiteSpace(macAddress))
+        {
+            return false;
+        }
+
+        var normalised = MacAddressFormatter.Normalise(macAddress);
+        return normalised.Length == 12 && NormalisedMacs.Contains(normalised);
+    }
+
+    public bool MatchesHostname(string? hostname)
+    {
+        if (string.IsNullOrWhiteSpace(hostname))
+        {
+            return false;
+        }
+
+        var trimmed = hostname.Trim().TrimEnd('.');
+        var shortName = trimmed.Split('.', 2)[0];
+
+        return KnownHostnames.Concat(KnownTailscaleNames).Any(candidate =>
+        {
+            var candidateTrimmed = candidate.Trim().TrimEnd('.');
+            return string.Equals(candidateTrimmed, trimmed, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(candidateTrimmed.Split('.', 2)[0], shortName, StringComparison.OrdinalIgnoreCase);
+        });
+    }
 }
 
 public sealed class KnownDeviceSshOptions

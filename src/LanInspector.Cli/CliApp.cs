@@ -5,6 +5,8 @@ using System.Text.Json;
 using LanInspector.Core.Configuration;
 using LanInspector.Core.Diagnostics;
 using LanInspector.Core.Dns;
+using LanInspector.Core.Identity;
+using LanInspector.Core.Locator;
 using LanInspector.Core.Flipper;
 using LanInspector.Core.Flipper.Nfc;
 using LanInspector.Core.Flipper.SubGhz;
@@ -35,11 +37,14 @@ internal static class CliApp
         var tailscale = PlatformServiceFactory.CreateTailscaleService();
         var knownDevices = LoadKnownDevices();
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        var ct = cts.Token;
-
         var command = args[0].ToLowerInvariant();
         var rest = args.Skip(1).ToArray();
+
+        // Each command gets its own budget. A single global timeout would abort scans and radio
+        // captures that legitimately run for minutes, and linking a longer token to a shorter
+        // parent does not extend it — the parent still cancels the child.
+        using var cts = new CancellationTokenSource(GetCommandTimeout(command));
+        var ct = cts.Token;
 
         switch (command)
         {
@@ -53,6 +58,11 @@ internal static class CliApp
 
             case "known":
                 RunKnown(knownDevices);
+                break;
+
+            case "locate":
+            case "whereis":
+                await RunLocateAsync(rest, knownDevices, tailscale, ct);
                 break;
 
             case "check":
@@ -217,6 +227,123 @@ internal static class CliApp
         }
     }
 
+    private static DeviceLocatorService CreateLocator(ITailscaleService tailscale)
+    {
+        return new DeviceLocatorService(
+            tailscale,
+            new LocalNetworkProfileProvider(),
+            new ArpTableReader(),
+            new PortScanner(),
+            new HostnameResolver(),
+            new DeviceLocationHistoryStore());
+    }
+
+    private static async Task RunLocateAsync(
+        string[] args,
+        IReadOnlyList<KnownDeviceDefinition> knownDevices,
+        ITailscaleService tailscale,
+        CancellationToken ct)
+    {
+        var asJson = args.Contains("--json");
+        var probe = args.Contains("--probe");
+        var id = args.FirstOrDefault(a => !a.StartsWith("--", StringComparison.Ordinal));
+
+        var targets = id is null
+            ? knownDevices
+            : knownDevices.Where(d => string.Equals(d.Id, id, StringComparison.OrdinalIgnoreCase)).ToArray();
+
+        if (targets.Count == 0)
+        {
+            Console.Error.WriteLine(id is null
+                ? "No known devices configured. Create known-devices.json first."
+                : $"Device '{id}' not found in known devices.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        var options = DeviceLocatorOptions.Default with { UseTailscalePingProbe = probe };
+        var locations = await CreateLocator(tailscale).LocateAllAsync(targets, options, ct);
+
+        if (asJson)
+        {
+            Console.WriteLine(JsonSerializer.Serialize(locations.Select(location => new
+            {
+                deviceId = location.DeviceId,
+                displayName = location.DisplayName,
+                currentAddress = location.CurrentAddress?.ToString(),
+                source = location.Source?.ToString(),
+                confidence = location.Confidence.ToString(),
+                tailscaleAddress = location.TailscaleAddress?.ToString(),
+                tailscaleName = location.TailscaleName,
+                previousAddress = location.PreviousAddress?.ToString(),
+                addressChangedAt = location.AddressChangedAt,
+                hasMoved = location.HasMoved,
+                candidates = location.Candidates.Select(candidate => new
+                {
+                    address = candidate.Address.ToString(),
+                    source = candidate.Source.ToString(),
+                    detail = candidate.Detail,
+                    isVerified = candidate.IsVerified,
+                    verifiedPort = candidate.VerifiedPort
+                }),
+                evidence = location.Evidence
+            }), new JsonSerializerOptions { WriteIndented = true }));
+            return;
+        }
+
+        Console.WriteLine("LanInspector Device Locator");
+        Console.WriteLine(new string('-', 60));
+        if (!probe)
+        {
+            Console.WriteLine("Tip: add --probe to run 'tailscale ping' when passive evidence is thin.");
+        }
+
+        foreach (var location in locations)
+        {
+            Console.WriteLine();
+            Console.WriteLine($"{location.DisplayName} ({location.DeviceId})");
+            Console.WriteLine($"  Current LAN IP : {location.CurrentAddress?.ToString() ?? "(not found)"}");
+            Console.WriteLine($"  Found via      : {(location.Source is null ? "-" : DeviceLocation.Describe(location.Source.Value))}");
+            Console.WriteLine($"  Confidence     : {location.Confidence}");
+
+            if (location.TailscaleAddress is not null)
+            {
+                Console.WriteLine($"  Tailscale      : {location.TailscaleAddress}" +
+                                  (string.IsNullOrWhiteSpace(location.TailscaleName) ? "" : $"  ({location.TailscaleName})"));
+            }
+
+            if (location.HasMoved)
+            {
+                var changed = location.AddressChangedAt is null ? "" : $" at {location.AddressChangedAt:u}";
+                Console.WriteLine($"  Changed        : was {location.PreviousAddress}{changed}");
+            }
+
+            if (location.Candidates.Count > 0)
+            {
+                Console.WriteLine("  Candidates:");
+                foreach (var candidate in location.Candidates)
+                {
+                    var mark = candidate.IsVerified switch
+                    {
+                        true => $"[open :{candidate.VerifiedPort}]",
+                        false => "[no answer]",
+                        _ => "[not probed]"
+                    };
+                    Console.WriteLine($"    {candidate.Address,-16} {mark,-14} {candidate.Detail}");
+                }
+            }
+
+            if (location.Evidence.Count > 0)
+            {
+                Console.WriteLine("  Evidence:");
+                foreach (var line in location.Evidence)
+                {
+                    Console.WriteLine($"    * {line}");
+                }
+            }
+        }
+    }
+
     private static async Task RunCheckKnownAsync(string[] args, IReadOnlyList<KnownDeviceDefinition> knownDevices, IRouteDiagnosticsService routeDiag, CancellationToken ct)
     {
         if (args.Length == 0)
@@ -359,12 +486,16 @@ internal static class CliApp
             return;
         }
 
-        // Prefer Tailscale name if available
         var tailscaleStatus = await tailscale.GetStatusAsync(ct);
-        var preferredHost = FindBestHost(device, tailscaleStatus);
+        var location = await CreateLocator(tailscale).LocateAsync(device, DeviceLocatorOptions.Default, ct);
+        var preferredHost = FindBestHost(device, tailscaleStatus, location);
         var command = SshCommandGenerator.Generate(device.Ssh.User, preferredHost, device.Ssh.Port);
 
         Console.WriteLine($"SSH command: {command}");
+        if (location.CurrentAddress is not null && !string.Equals(preferredHost, location.CurrentAddress.ToString(), StringComparison.Ordinal))
+        {
+            Console.WriteLine($"  (device is currently at {location.CurrentAddress} on the LAN)");
+        }
 
         if (printOnly || !openTerminal)
         {
@@ -568,41 +699,82 @@ internal static class CliApp
         }
     }
 
-    private static string FindBestHost(KnownDeviceDefinition device, TailscaleStatus tailscaleStatus)
+    /// <summary>
+    /// Chooses the host to put in an SSH command: an online Tailscale peer's MagicDNS name first
+    /// (it keeps working from any network and survives DHCP changes), then the address the locator
+    /// just confirmed, and only then the configured address, which may be stale.
+    /// </summary>
+    private static string FindBestHost(KnownDeviceDefinition device, TailscaleStatus tailscaleStatus, DeviceLocation? location = null)
     {
-        if (tailscaleStatus.State == TailscaleConnectionState.Connected && device.KnownTailscaleNames.Count > 0)
+        if (tailscaleStatus.State == TailscaleConnectionState.Connected)
         {
-            var peer = tailscaleStatus.Peers.FirstOrDefault(p =>
-                device.KnownTailscaleNames.Any(n =>
-                    string.Equals(n, p.Name, StringComparison.OrdinalIgnoreCase)));
+            var peer = tailscaleStatus.FindPeerByName(device.KnownTailscaleNames.Concat(device.KnownHostnames).Append(device.Id));
             if (peer is not null && peer.IsOnline)
             {
-                return peer.Name;
+                // The fully-qualified MagicDNS name resolves even where the short name does not.
+                return !string.IsNullOrWhiteSpace(peer.DnsName) ? peer.DnsName : peer.Name;
             }
         }
 
-        return device.KnownIps.FirstOrDefault() ?? device.Id;
-    }
-
-    private static IReadOnlyList<KnownDeviceDefinition> LoadKnownDevices()
-    {
-        var searchPaths = new[]
+        if (location?.CurrentAddress is not null && location.Confidence != LocationConfidence.Low)
         {
-            Path.Combine(Directory.GetCurrentDirectory(), "known-devices.json"),
-            Path.Combine(Directory.GetCurrentDirectory(), "known-devices.local.json"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config", "laninspector", "known-devices.json"),
-            Path.Combine(AppContext.BaseDirectory, "Data", "known-devices.json"),
-            Path.Combine(AppContext.BaseDirectory, "known-devices.json")
-        };
-
-        var existingPaths = searchPaths.Where(File.Exists).ToArray();
-        if (existingPaths.Length == 0)
-        {
-            return [];
+            return location.CurrentAddress.ToString();
         }
 
-        return KnownDevicesConfiguration.LoadMany(existingPaths).KnownDevices;
+        return device.KnownIps.FirstOrDefault()
+            ?? device.KnownHostnames.FirstOrDefault()
+            ?? device.Id;
     }
+
+    internal static IReadOnlyList<KnownDeviceDefinition> LoadKnownDevices()
+    {
+        return KnownDevicesConfiguration.LoadMany(GetKnownDeviceSearchPaths().Where(File.Exists).ToArray()).KnownDevices;
+    }
+
+    /// <summary>
+    /// Configuration search order, least specific first. <see cref="KnownDevicesConfiguration.LoadMany"/>
+    /// merges by id with later files winning, so the shipped defaults are listed first and the
+    /// user's own files last — otherwise the copy bundled next to the executable would silently
+    /// override the one the user edited.
+    /// </summary>
+    internal static IEnumerable<string> GetKnownDeviceSearchPaths()
+    {
+        yield return Path.Combine(AppContext.BaseDirectory, "Data", "known-devices.json");
+        yield return Path.Combine(AppContext.BaseDirectory, "known-devices.json");
+        yield return Path.Combine(AppContext.BaseDirectory, "Data", "known-devices.local.json");
+        yield return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config", "laninspector", "known-devices.json");
+        yield return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config", "laninspector", "known-devices.local.json");
+        yield return Path.Combine(Directory.GetCurrentDirectory(), "known-devices.json");
+        yield return Path.Combine(Directory.GetCurrentDirectory(), "known-devices.local.json");
+    }
+
+    /// <summary>
+    /// Reads the value following a flag, returning null when the flag is absent or is the final
+    /// argument (rather than indexing past the end of the array).
+    /// </summary>
+    internal static string? TryGetFlagValue(string[] args, string flag)
+    {
+        var index = Array.IndexOf(args, flag);
+        return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
+    }
+
+    internal static int TryGetFlagValue(string[] args, string flag, int fallback)
+    {
+        var raw = TryGetFlagValue(args, flag);
+        return raw is not null && int.TryParse(raw, out var parsed) ? parsed : fallback;
+    }
+
+    private static TimeSpan GetCommandTimeout(string command) => command switch
+    {
+        // Active scans and radio captures are user-initiated and inherently slow.
+        "nmap" => TimeSpan.FromMinutes(10),
+        "pcap" => TimeSpan.FromMinutes(30),
+        "flipper" => TimeSpan.FromMinutes(10),
+        "trace" => TimeSpan.FromMinutes(2),
+        "recommend" or "visibility" or "check" => TimeSpan.FromMinutes(2),
+        "locate" => TimeSpan.FromMinutes(3),
+        _ => TimeSpan.FromSeconds(30)
+    };
 
     private static string GetOsName()
     {
@@ -689,15 +861,34 @@ internal static class CliApp
         Console.WriteLine("LanInspector Visibility — All Known Devices");
         Console.WriteLine(new string('-', 50));
 
-        var results = await svc.ExplainAllKnownAsync(ct);
-        if (results.Count == 0)
+        if (knownDevices.Count == 0)
         {
             Console.WriteLine("No known devices to check. Add them to known-devices.json.");
             return;
         }
 
-        foreach (var ex in results)
-            PrintVisibility(ex);
+        // Explain where each device actually is now. Explaining only the configured addresses
+        // produced confident "not visible" verdicts about addresses the device had already left.
+        var locations = await CreateLocator(tailscale).LocateAllAsync(knownDevices, DeviceLocatorOptions.Default, ct);
+
+        foreach (var location in locations)
+        {
+            if (location.CurrentAddress is null)
+            {
+                Console.WriteLine();
+                Console.WriteLine($"[NOT LOCATED] {location.DisplayName}");
+                Console.WriteLine($"  {location.Summary}");
+                continue;
+            }
+
+            if (location.Source != LocationSource.ConfiguredAddress)
+            {
+                Console.WriteLine();
+                Console.WriteLine($"(located {location.DisplayName} at {location.CurrentAddress} via {DeviceLocation.Describe(location.Source!.Value)})");
+            }
+
+            PrintVisibility(await svc.ExplainAsync(location.CurrentAddress, ct));
+        }
     }
 
     private static void PrintVisibility(VisibilityExplanation ex)
@@ -768,10 +959,7 @@ internal static class CliApp
 
         Console.WriteLine($"Running nmap {mode} scan on {target}...");
 
-        using var longCt = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        longCt.CancelAfter(TimeSpan.FromMinutes(10));
-
-        var result = await nmap.ScanAsync(target, mode, longCt.Token);
+        var result = await nmap.ScanAsync(target, mode, ct);
 
         if (!result.Succeeded)
         {
@@ -963,10 +1151,7 @@ internal static class CliApp
 
         var svc = new SnmpDiscoveryService();
 
-        using var snmpCt = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        snmpCt.CancelAfter(TimeSpan.FromSeconds(10));
-
-        var result = await svc.QueryAsync(target, community, snmpCt.Token);
+        var result = await svc.QueryAsync(target, community, ct);
 
         if (!result.Succeeded)
         {
@@ -1018,7 +1203,7 @@ internal static class CliApp
         }
 
         // Commands below require a live connection
-        var port = rest.Contains("--port") ? rest[Array.IndexOf(rest, "--port") + 1] : null;
+        var port = TryGetFlagValue(rest, "--port");
 
         Console.Write("Connecting to Flipper Zero... ");
         var connected = await flipper.ConnectAsync(port, ct);
@@ -1140,11 +1325,8 @@ internal static class CliApp
         Console.WriteLine("Scanning... (press Ctrl+C to abort early)");
         Console.WriteLine();
 
-        using var longCt = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        longCt.CancelAfter(TimeSpan.FromMinutes(5));
-
         var svc    = new FlipperSubGhzService(flipper);
-        var result = await svc.ScanAsync(freqList, dwell, longCt.Token);
+        var result = await svc.ScanAsync(freqList, dwell, ct);
 
         Console.WriteLine($"Scan complete — {result.FrequenciesScanned.Count} frequency/ies, {(int)result.Duration.TotalSeconds}s elapsed");
         Console.WriteLine();
@@ -1329,6 +1511,8 @@ internal static class CliApp
         Console.WriteLine("  status                     Show current network and Tailscale status");
         Console.WriteLine("  interfaces                 List network interfaces");
         Console.WriteLine("  known                      List known devices from config");
+        Console.WriteLine("  locate [<id>] [--probe]    Find a known device's current LAN IP (alias: whereis)");
+        Console.WriteLine("                             --json for machine-readable output");
         Console.WriteLine("  check <id>                 Check reachability of a known device");
         Console.WriteLine("  check-ip <ip> [--port <p>] Check reachability of an IP/port");
         Console.WriteLine("  route <ip>                 Show route to an IP address");
@@ -1354,10 +1538,10 @@ internal static class CliApp
         Console.WriteLine("  flipper topology [--duration <sec>] [--json|--mermaid]  Topology with IoT");
         Console.WriteLine("  flipper cmd <command> [--timeout <sec>]            Raw CLI passthrough");
         Console.WriteLine();
-        Console.WriteLine("Known device config is loaded from (first match wins):");
-        Console.WriteLine("  ./known-devices.json");
-        Console.WriteLine("  ~/.config/laninspector/known-devices.json");
-        Console.WriteLine("  <exe-dir>/Data/known-devices.json");
+        Console.WriteLine("Known device config is merged by device id from (later files win):");
+        Console.WriteLine("  <exe-dir>/Data/known-devices.json, then known-devices.local.json");
+        Console.WriteLine("  ~/.config/laninspector/known-devices.json, then known-devices.local.json");
+        Console.WriteLine("  ./known-devices.json, then ./known-devices.local.json");
         Console.WriteLine();
         Console.WriteLine("No passwords are stored. SSH uses your local keys and ssh-agent.");
     }

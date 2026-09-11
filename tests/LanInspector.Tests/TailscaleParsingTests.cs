@@ -1,3 +1,4 @@
+using System.Net;
 using LanInspector.Core.RemoteAccess;
 using Xunit;
 
@@ -5,25 +6,32 @@ namespace LanInspector.Tests;
 
 public sealed class TailscaleParsingTests
 {
-    private static readonly string ConnectedJson = """
+    // Trimmed from real `tailscale status --json` output. The peer carries the endpoint fields
+    // that let the locator recover a LAN address after a DHCP change.
+    private const string ConnectedJson = """
         {
           "Version": "1.56.1-t123abc",
           "BackendState": "Running",
           "Self": {
             "HostName": "my-laptop",
-            "DNSName": "my-laptop.tailnet-name.ts.net.",
+            "DNSName": "my-laptop.tail7f7c1e.ts.net.",
             "TailscaleIPs": ["100.64.0.1"]
           },
           "Peer": {
             "abc123": {
-              "HostName": "home-server",
-              "DNSName": "home-server.tailnet-name.ts.net.",
-              "TailscaleIPs": ["100.64.0.2"],
+              "HostName": "ubuntu-svr",
+              "DNSName": "ubuntu-svr.tail7f7c1e.ts.net.",
+              "TailscaleIPs": ["100.83.183.74"],
+              "Addrs": ["192.168.0.154:41641", "203.0.113.9:41641"],
+              "CurAddr": "192.168.0.154:41641",
+              "PeerAPIURL": ["http://192.168.0.154:37649"],
+              "OS": "linux",
+              "LastSeen": "2026-09-11T09:12:00Z",
               "Online": true
             },
             "def456": {
               "HostName": "other-device",
-              "DNSName": "other-device.tailnet-name.ts.net.",
+              "DNSName": "other-device.tail7f7c1e.ts.net.",
               "TailscaleIPs": ["100.64.0.3"],
               "Online": false
             }
@@ -31,7 +39,7 @@ public sealed class TailscaleParsingTests
         }
         """;
 
-    private static readonly string NotRunningJson = """
+    private const string NotRunningJson = """
         {
           "Version": "1.56.1",
           "BackendState": "Stopped"
@@ -39,131 +47,134 @@ public sealed class TailscaleParsingTests
         """;
 
     [Fact]
-    public async Task GetStatusAsync_ConnectedJson_ReturnsConnected()
+    public void Parse_ConnectedJson_ReturnsConnected()
     {
-        var service = new TestTailscaleCliService(ConnectedJson);
-        var status = await service.GetStatusAsync();
+        var status = TailscaleStatusParser.Parse(ConnectedJson);
 
         Assert.Equal(TailscaleConnectionState.Connected, status.State);
         Assert.Equal("my-laptop", status.LocalName);
-        Assert.Single(status.LocalIps);
-        Assert.Equal("100.64.0.1", status.LocalIps[0].ToString());
+        Assert.Equal("100.64.0.1", Assert.Single(status.LocalIps).ToString());
     }
 
     [Fact]
-    public async Task GetStatusAsync_ConnectedJson_ParsesPeers()
+    public void Parse_ConnectedJson_ParsesPeers()
     {
-        var service = new TestTailscaleCliService(ConnectedJson);
-        var status = await service.GetStatusAsync();
+        var status = TailscaleStatusParser.Parse(ConnectedJson);
 
         Assert.Equal(2, status.Peers.Count);
-        var server = status.Peers.First(p => p.Name == "home-server");
+        var server = status.Peers.First(peer => peer.Name == "ubuntu-svr");
         Assert.True(server.IsOnline);
-        Assert.Equal("100.64.0.2", server.TailscaleIps[0].ToString());
-        Assert.Equal("home-server.tailnet-name.ts.net", server.DnsName);
+        Assert.Equal("100.83.183.74", server.TailscaleIps[0].ToString());
+        Assert.Equal("ubuntu-svr.tail7f7c1e.ts.net", server.DnsName);
+        Assert.Equal("linux", server.OperatingSystem);
     }
 
     [Fact]
-    public async Task GetStatusAsync_NotRunningJson_ReturnsInstalledNotConnected()
+    public void Parse_PeerWithDirectPath_ExposesCurrentAddress()
     {
-        var service = new TestTailscaleCliService(NotRunningJson, isInstalled: true);
-        var status = await service.GetStatusAsync();
+        var server = TailscaleStatusParser.Parse(ConnectedJson).Peers.First(peer => peer.Name == "ubuntu-svr");
+
+        Assert.NotNull(server.CurrentAddress);
+        Assert.Equal("192.168.0.154", server.CurrentAddress!.Address.ToString());
+        Assert.Equal(41641, server.CurrentAddress.Port);
+    }
+
+    [Fact]
+    public void LanAddressCandidates_KeepsPrivateAddressesAndDropsPublicOnes()
+    {
+        var server = TailscaleStatusParser.Parse(ConnectedJson).Peers.First(peer => peer.Name == "ubuntu-svr");
+
+        var candidates = server.LanAddressCandidates.Select(address => address.ToString()).ToArray();
+
+        Assert.Equal(["192.168.0.154"], candidates);
+    }
+
+    [Fact]
+    public void Parse_PeerWithoutEndpoints_HasNoLanCandidates()
+    {
+        var peer = TailscaleStatusParser.Parse(ConnectedJson).Peers.First(p => p.Name == "other-device");
+
+        Assert.Empty(peer.Endpoints);
+        Assert.Null(peer.CurrentAddress);
+        Assert.Empty(peer.LanAddressCandidates);
+    }
+
+    [Fact]
+    public void Parse_NotRunningJson_ReturnsInstalledNotConnected()
+    {
+        var status = TailscaleStatusParser.Parse(NotRunningJson);
 
         Assert.Equal(TailscaleConnectionState.InstalledNotConnected, status.State);
         Assert.Empty(status.Peers);
     }
 
     [Fact]
-    public async Task GetStatusAsync_NotInstalled_ReturnsNotInstalled()
+    public void Parse_Garbage_DoesNotThrow()
     {
-        var service = new TestTailscaleCliService(null, isInstalled: false);
-        var status = await service.GetStatusAsync();
+        var status = TailscaleStatusParser.Parse("not json at all");
 
-        Assert.Equal(TailscaleConnectionState.NotInstalled, status.State);
+        Assert.Equal(TailscaleConnectionState.InstalledNotConnected, status.State);
     }
 
-    // Test-only implementation that bypasses process execution
-    private sealed class TestTailscaleCliService : ITailscaleService
+    [Theory]
+    [InlineData("ubuntu-svr")]
+    [InlineData("UBUNTU-SVR")]
+    [InlineData("ubuntu-svr.tail7f7c1e.ts.net")]
+    [InlineData("ubuntu-svr.tail7f7c1e.ts.net.")]
+    public void FindPeerByName_MatchesShortAndQualifiedNames(string name)
     {
-        private readonly string? _statusJson;
-        private readonly bool _isInstalled;
+        var status = TailscaleStatusParser.Parse(ConnectedJson);
 
-        public TestTailscaleCliService(string? statusJson, bool isInstalled = true)
-        {
-            _statusJson = statusJson;
-            _isInstalled = isInstalled;
-        }
+        Assert.Equal("ubuntu-svr", status.FindPeerByName([name])?.Name);
+    }
 
-        public Task<TailscaleStatus> GetStatusAsync(CancellationToken cancellationToken = default)
-        {
-            if (!_isInstalled)
-            {
-                return Task.FromResult(new TailscaleStatus(TailscaleConnectionState.NotInstalled, [], []));
-            }
+    [Fact]
+    public void FindPeerByName_UnknownName_ReturnsNull()
+    {
+        var status = TailscaleStatusParser.Parse(ConnectedJson);
 
-            if (_statusJson is null)
-            {
-                return Task.FromResult(new TailscaleStatus(TailscaleConnectionState.InstalledNotConnected, [], []));
-            }
+        Assert.Null(status.FindPeerByName(["no-such-host"]));
+    }
 
-            return Task.FromResult(ParseJson(_statusJson));
-        }
+    [Fact]
+    public void TryParseDirectEndpoint_DirectReply_ReturnsLanEndpoint()
+    {
+        const string output = """
+            pong from ubuntu-svr (100.83.183.74) via 192.168.0.154:41641 in 3ms
+            """;
 
-        private static TailscaleStatus ParseJson(string json)
-        {
-            // Delegate to the same logic used in TailscaleCliService via reflection or duplicate logic.
-            // For test purposes, use a simplified parser that matches the production code.
-            using var doc = System.Text.Json.JsonDocument.Parse(json);
-            var root = doc.RootElement;
+        var endpoint = TailscalePingParser.TryParseDirectEndpoint(output);
 
-            var backendState = root.TryGetProperty("BackendState", out var stateEl) ? stateEl.GetString() : null;
-            if (!string.Equals(backendState, "Running", StringComparison.OrdinalIgnoreCase))
-            {
-                return new TailscaleStatus(TailscaleConnectionState.InstalledNotConnected, [], []);
-            }
+        Assert.Equal(new IPEndPoint(IPAddress.Parse("192.168.0.154"), 41641), endpoint);
+    }
 
-            var selfName = string.Empty;
-            var localIps = new List<System.Net.IPAddress>();
-            if (root.TryGetProperty("Self", out var selfEl))
-            {
-                selfName = selfEl.TryGetProperty("HostName", out var hn) ? hn.GetString() ?? string.Empty : string.Empty;
-                if (selfEl.TryGetProperty("TailscaleIPs", out var ips))
-                {
-                    foreach (var ip in ips.EnumerateArray())
-                    {
-                        if (System.Net.IPAddress.TryParse(ip.GetString(), out var parsed))
-                        {
-                            localIps.Add(parsed);
-                        }
-                    }
-                }
-            }
+    [Fact]
+    public void TryParseDirectEndpoint_SkipsRelayedRepliesUntilDirectOneArrives()
+    {
+        const string output = """
+            pong from ubuntu-svr (100.83.183.74) via DERP(syd) in 42ms
+            pong from ubuntu-svr (100.83.183.74) via DERP(syd) in 41ms
+            pong from ubuntu-svr (100.83.183.74) via 192.168.0.154:41641 in 2ms
+            """;
 
-            var peers = new List<TailscaleDevice>();
-            if (root.TryGetProperty("Peer", out var peersEl))
-            {
-                foreach (var peer in peersEl.EnumerateObject())
-                {
-                    var hostname = peer.Value.TryGetProperty("HostName", out var hn) ? hn.GetString() ?? string.Empty : string.Empty;
-                    var dnsName = peer.Value.TryGetProperty("DNSName", out var dn) ? dn.GetString()?.TrimEnd('.') ?? string.Empty : string.Empty;
-                    var online = peer.Value.TryGetProperty("Online", out var ol) && ol.GetBoolean();
-                    var peerIps = new List<System.Net.IPAddress>();
-                    if (peer.Value.TryGetProperty("TailscaleIPs", out var pips))
-                    {
-                        foreach (var ip in pips.EnumerateArray())
-                        {
-                            if (System.Net.IPAddress.TryParse(ip.GetString(), out var p))
-                            {
-                                peerIps.Add(p);
-                            }
-                        }
-                    }
+        Assert.Equal("192.168.0.154", TailscalePingParser.TryParseDirectEndpoint(output)?.Address.ToString());
+        Assert.False(TailscalePingParser.IsRelayedOnly(output));
+    }
 
-                    peers.Add(new TailscaleDevice(hostname, dnsName, peerIps, online));
-                }
-            }
+    [Fact]
+    public void TryParseDirectEndpoint_RelayedOnly_ReturnsNull()
+    {
+        const string output = "pong from ubuntu-svr (100.83.183.74) via DERP(syd) in 42ms";
 
-            return new TailscaleStatus(TailscaleConnectionState.Connected, peers, localIps, selfName);
-        }
+        Assert.Null(TailscalePingParser.TryParseDirectEndpoint(output));
+        Assert.True(TailscalePingParser.IsRelayedOnly(output));
+    }
+
+    [Fact]
+    public void TryParseDirectEndpoint_NoReply_ReturnsNull()
+    {
+        Assert.Null(TailscalePingParser.TryParseDirectEndpoint("no matching peer"));
+        Assert.Null(TailscalePingParser.TryParseDirectEndpoint(null));
+        Assert.False(TailscalePingParser.IsRelayedOnly("no matching peer"));
     }
 }
