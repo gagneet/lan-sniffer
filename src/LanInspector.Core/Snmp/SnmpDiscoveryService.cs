@@ -14,6 +14,16 @@ public sealed class SnmpDiscoveryService : ISnmpDiscoveryService
     private static readonly ObjectIdentifier OidIpAddrTable = new("1.3.6.1.2.1.4.20");
     private static readonly ObjectIdentifier OidFdbTable = new("1.3.6.1.2.1.17.4.3");
 
+    private const string OidIfDescr = "1.3.6.1.2.1.2.2.1.2";
+    private const string OidIfSpeed = "1.3.6.1.2.1.2.2.1.5";
+    private const string OidIfOperStatus = "1.3.6.1.2.1.2.2.1.8";
+    private const string OidIfInOctets = "1.3.6.1.2.1.2.2.1.10";
+    private const string OidIfOutOctets = "1.3.6.1.2.1.2.2.1.16";
+
+    // IF-MIB high-capacity counters (64-bit), absent on many consumer routers.
+    private const string OidIfHcInOctets = "1.3.6.1.2.1.31.1.1.1.6";
+    private const string OidIfHcOutOctets = "1.3.6.1.2.1.31.1.1.1.10";
+
     private const int DefaultPort = 161;
     private const int TimeoutMs = 3000;
 
@@ -43,6 +53,117 @@ public sealed class SnmpDiscoveryService : ISnmpDiscoveryService
         catch (Exception ex)
         {
             return new SnmpQueryResult(target, null, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Reads byte counters for every interface. Prefers the 64-bit ifHC counters from IF-MIB's
+    /// extension table and falls back to the original 32-bit ones, which many consumer routers are
+    /// all that offer.
+    /// </summary>
+    public async Task<SnmpCountersResult> GetInterfaceCountersAsync(
+        IPAddress target, string community = "public", CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var endpoint = new IPEndPoint(target, DefaultPort);
+            var communityOctet = new OctetString(community);
+            var readAt = DateTimeOffset.UtcNow;
+
+            var descriptions = await WalkAsync(endpoint, communityOctet, new ObjectIdentifier(OidIfDescr), cancellationToken);
+            if (descriptions.Count == 0)
+            {
+                return new SnmpCountersResult(target, [], "No interface table returned. The device may not expose IF-MIB, or the community string may be wrong.");
+            }
+
+            var operStatus = await WalkAsync(endpoint, communityOctet, new ObjectIdentifier(OidIfOperStatus), cancellationToken);
+            var speeds = await WalkAsync(endpoint, communityOctet, new ObjectIdentifier(OidIfSpeed), cancellationToken);
+
+            // 64-bit counters live in a different subtree and are absent on many consumer devices.
+            var hcIn = await WalkQuietlyAsync(endpoint, communityOctet, OidIfHcInOctets, cancellationToken);
+            var hcOut = await WalkQuietlyAsync(endpoint, communityOctet, OidIfHcOutOctets, cancellationToken);
+            var isHighCapacity = hcIn.Count > 0 && hcOut.Count > 0;
+
+            var inOctets = isHighCapacity ? hcIn : await WalkAsync(endpoint, communityOctet, new ObjectIdentifier(OidIfInOctets), cancellationToken);
+            var outOctets = isHighCapacity ? hcOut : await WalkAsync(endpoint, communityOctet, new ObjectIdentifier(OidIfOutOctets), cancellationToken);
+
+            var interfaces = new List<SnmpInterfaceCounters>();
+
+            foreach (var entry in descriptions)
+            {
+                if (!TryGetIndex(entry.Key, out var index))
+                {
+                    continue;
+                }
+
+                if (!TryGetUInt64(inOctets, index, out var inValue) || !TryGetUInt64(outOctets, index, out var outValue))
+                {
+                    continue;
+                }
+
+                interfaces.Add(new SnmpInterfaceCounters(
+                    index,
+                    entry.Value,
+                    LookupByIndex(operStatus, index) ?? "unknown",
+                    long.TryParse(LookupByIndex(speeds, index), out var speed) ? speed : null,
+                    inValue,
+                    outValue,
+                    isHighCapacity,
+                    readAt));
+            }
+
+            return interfaces.Count == 0
+                ? new SnmpCountersResult(target, [], "The interface table was readable but carried no byte counters.")
+                : new SnmpCountersResult(target, interfaces);
+        }
+        catch (OperationCanceledException)
+        {
+            return new SnmpCountersResult(target, [], "Cancelled");
+        }
+        catch (Exception ex)
+        {
+            return new SnmpCountersResult(target, [], ex.Message);
+        }
+    }
+
+    private static bool TryGetIndex(ObjectIdentifier oid, out int index) =>
+        int.TryParse(oid.ToString().Split('.').Last(), out index);
+
+    /// <summary>
+    /// Matches a table row by its trailing index. Compared as a whole final segment so that
+    /// interface 1 does not also match interface 11 or 21.
+    /// </summary>
+    private static string? LookupByIndex(Dictionary<ObjectIdentifier, string> table, int index)
+    {
+        foreach (var entry in table)
+        {
+            if (TryGetIndex(entry.Key, out var candidate) && candidate == index)
+            {
+                return entry.Value;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool TryGetUInt64(Dictionary<ObjectIdentifier, string> table, int index, out ulong value)
+    {
+        value = 0;
+        var raw = LookupByIndex(table, index);
+        return raw is not null && ulong.TryParse(raw, out value);
+    }
+
+    /// <summary>Walks a subtree, returning an empty table rather than throwing when it is absent.</summary>
+    private static async Task<Dictionary<ObjectIdentifier, string>> WalkQuietlyAsync(
+        IPEndPoint endpoint, OctetString community, string oid, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await WalkAsync(endpoint, community, new ObjectIdentifier(oid), cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return [];
         }
     }
 

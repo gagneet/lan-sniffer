@@ -32,8 +32,8 @@ public sealed class TrafficFlowService : ITrafficFlowService
 
     private readonly ConcurrentDictionary<string, TrafficFlow> _flows = new();
     private readonly ConcurrentDictionary<string, TalkerState> _talkers = new(StringComparer.OrdinalIgnoreCase);
-    private readonly TimeSeries _seconds = new(SecondBucket, MaxSecondBuckets);
-    private readonly TimeSeries _minutes = new(MinuteBucket, MaxMinuteBuckets);
+    private readonly TimeSeries _seconds = new(SecondBucket, MaxSecondBuckets, trackContributors: true);
+    private readonly TimeSeries _minutes = new(MinuteBucket, MaxMinuteBuckets, trackContributors: true);
     private readonly TimeProvider _timeProvider;
     private long _totalPackets;
     private long _totalBytes;
@@ -75,8 +75,8 @@ public sealed class TrafficFlowService : ITrafficFlowService
         Interlocked.Increment(ref _totalPackets);
         Interlocked.Add(ref _totalBytes, bytes);
 
-        var closedSecond = _seconds.Add(now, bytes);
-        _minutes.Add(now, bytes);
+        var closedSecond = _seconds.Add(now, bytes, key);
+        _minutes.Add(now, bytes, key);
 
         // Raising this per packet made the event fire thousands of times a second on a busy link
         // for a UI that only redraws once a second. Signalling on bucket close is enough.
@@ -171,6 +171,13 @@ public sealed class TrafficFlowService : ITrafficFlowService
             state.ProtocolShares());
     }
 
+    /// <summary>
+    /// What made up one bar on the chart: the conversations active during that bucket, heaviest
+    /// first. Returns null for a bucket that has fallen out of the retained window.
+    /// </summary>
+    public TrafficBucketDetail? GetBucketDetail(DateTime bucketStart, TrafficWindow window, int topCount = 15) =>
+        GetSeriesFor(window).GetDetail(bucketStart, topCount);
+
     public IReadOnlyList<TrafficFlow> GetFlowsForIp(string ipAddress) =>
         _flows.Values
             .Where(flow => flow.Key.SourceIp.ToString() == ipAddress || flow.Key.DestIp.ToString() == ipAddress)
@@ -196,14 +203,15 @@ public sealed class TrafficFlowService : ITrafficFlowService
     /// implementation replaced the current bucket outside the lock during a reset, which could
     /// drop or double-count a concurrent packet.
     /// </summary>
-    private sealed class TimeSeries(TimeSpan bucketDuration, int maxBuckets)
+    private sealed class TimeSeries(TimeSpan bucketDuration, int maxBuckets, bool trackContributors = false)
     {
         private readonly Queue<TrafficTimeBucket> _closed = new();
+        private readonly Dictionary<DateTime, BucketAttribution> _attribution = [];
         private readonly object _gate = new();
         private TrafficTimeBucket? _current;
 
         /// <summary>Returns true when this packet closed the previous bucket.</summary>
-        public bool Add(DateTime timestamp, int bytes)
+        public bool Add(DateTime timestamp, int bytes, TrafficFlowKey? flow = null)
         {
             var start = Floor(timestamp);
             lock (_gate)
@@ -219,7 +227,8 @@ public sealed class TrafficFlowService : ITrafficFlowService
                     _closed.Enqueue(_current);
                     while (_closed.Count > maxBuckets)
                     {
-                        _closed.Dequeue();
+                        var evicted = _closed.Dequeue();
+                        _attribution.Remove(evicted.BucketStart);
                     }
 
                     _current = NewBucket(start);
@@ -228,7 +237,52 @@ public sealed class TrafficFlowService : ITrafficFlowService
 
                 _current.Packets++;
                 _current.Bytes += bytes;
+
+                if (trackContributors && flow is not null)
+                {
+                    if (!_attribution.TryGetValue(start, out var attribution))
+                    {
+                        attribution = new BucketAttribution();
+                        _attribution[start] = attribution;
+                    }
+
+                    attribution.Add(flow, bytes);
+                }
+
                 return closed;
+            }
+        }
+
+        /// <summary>
+        /// What made up one bucket. Returns null for a bucket outside the retained window, or for
+        /// a series that does not track attribution.
+        /// </summary>
+        public TrafficBucketDetail? GetDetail(DateTime bucketStart, int topCount)
+        {
+            var start = Floor(bucketStart);
+
+            lock (_gate)
+            {
+                var bucket = _current?.BucketStart == start
+                    ? _current
+                    : _closed.FirstOrDefault(candidate => candidate.BucketStart == start);
+
+                if (bucket is null)
+                {
+                    return null;
+                }
+
+                var attribution = _attribution.GetValueOrDefault(start);
+
+                return new TrafficBucketDetail(
+                    start,
+                    bucketDuration,
+                    bucket.Bytes,
+                    bucket.Packets,
+                    attribution?.Top(topCount) ?? [])
+                {
+                    IsTruncated = attribution?.IsTruncated ?? false
+                };
             }
         }
 
@@ -268,6 +322,7 @@ public sealed class TrafficFlowService : ITrafficFlowService
             lock (_gate)
             {
                 _closed.Clear();
+                _attribution.Clear();
                 _current = null;
             }
         }
@@ -277,6 +332,54 @@ public sealed class TrafficFlowService : ITrafficFlowService
 
         private TrafficTimeBucket NewBucket(DateTime start) =>
             new() { BucketStart = start, BucketDuration = bucketDuration };
+    }
+
+    /// <summary>
+    /// Per-conversation byte and packet counts inside one time bucket.
+    /// </summary>
+    /// <remarks>
+    /// Capped, because attribution is kept for every retained bucket at both resolutions and a
+    /// scan or a broadcast storm can mint conversations without limit. Once the cap is reached
+    /// existing conversations keep counting but new ones are dropped, and the bucket is flagged
+    /// truncated so the UI can say the breakdown is partial rather than quietly under-reporting.
+    /// </remarks>
+    private sealed class BucketAttribution
+    {
+        private const int MaxContributors = 64;
+
+        private readonly Dictionary<TrafficFlowKey, long[]> _contributors = [];
+
+        public bool IsTruncated { get; private set; }
+
+        public void Add(TrafficFlowKey flow, int bytes)
+        {
+            if (!_contributors.TryGetValue(flow, out var counters))
+            {
+                if (_contributors.Count >= MaxContributors)
+                {
+                    IsTruncated = true;
+                    return;
+                }
+
+                counters = new long[2];
+                _contributors[flow] = counters;
+            }
+
+            counters[0] += bytes;
+            counters[1]++;
+        }
+
+        public IReadOnlyList<TrafficBucketContributor> Top(int count) =>
+            _contributors
+                .OrderByDescending(entry => entry.Value[0])
+                .Take(count)
+                .Select(entry => new TrafficBucketContributor(
+                    $"{entry.Key.SourceIp}:{entry.Key.SourcePort}",
+                    $"{entry.Key.DestIp}:{entry.Key.DestPort}",
+                    entry.Key.Protocol,
+                    entry.Value[0],
+                    entry.Value[1]))
+                .ToList();
     }
 
     private sealed class TalkerState(string address, DateTime firstSeen)

@@ -13,6 +13,12 @@ public interface ITrafficFlowService
     /// </summary>
     TrafficTalkerDetail? GetTalkerDetail(string ipAddress, TrafficWindow window, int topFlowsCount = 20);
 
+    /// <summary>
+    /// The conversations that made up one time bucket — what a click on a chart bar shows.
+    /// Null when the bucket is outside the retained window.
+    /// </summary>
+    TrafficBucketDetail? GetBucketDetail(DateTime bucketStart, TrafficWindow window, int topCount = 15);
+
     IReadOnlyList<TrafficFlow> GetFlowsForIp(string ipAddress);
 
     void Reset();

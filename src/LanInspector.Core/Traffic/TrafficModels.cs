@@ -88,6 +88,38 @@ public static class TrafficWindows
 }
 
 /// <summary>
+/// One conversation's share of a single time bucket — the answer to "what was using the network
+/// at 10:42?".
+/// </summary>
+public sealed record TrafficBucketContributor(
+    string Source,
+    string Destination,
+    string Protocol,
+    long Bytes,
+    long Packets);
+
+/// <summary>
+/// What a single bar on the throughput chart is made of.
+/// </summary>
+public sealed record TrafficBucketDetail(
+    DateTime BucketStart,
+    TimeSpan BucketDuration,
+    long Bytes,
+    long Packets,
+    IReadOnlyList<TrafficBucketContributor> Contributors)
+{
+    public double BytesPerSecond => BucketDuration.TotalSeconds > 0 ? Bytes / BucketDuration.TotalSeconds : 0;
+
+    /// <summary>
+    /// True when the bucket held more distinct conversations than it could keep attribution for,
+    /// so <see cref="Contributors"/> accounts for only part of <see cref="Bytes"/>.
+    /// </summary>
+    public bool IsTruncated { get; init; }
+
+    public long AttributedBytes => Contributors.Sum(contributor => contributor.Bytes);
+}
+
+/// <summary>
 /// One host's share of the traffic, aggregated across every flow it took part in. This is the
 /// entry point for drilling down: pick a talker, then look at its own series, peers and flows.
 /// </summary>

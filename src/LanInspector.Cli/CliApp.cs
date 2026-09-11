@@ -1155,8 +1155,14 @@ internal static class CliApp
             return;
         }
 
-        var communityIdx = Array.IndexOf(args, "--community");
-        var community = communityIdx >= 0 && communityIdx + 1 < args.Length ? args[communityIdx + 1] : "public";
+        var community = TryGetFlagValue(args, "--community") ?? "public";
+        var svcForThroughput = new SnmpDiscoveryService();
+
+        if (args.Contains("--throughput"))
+        {
+            await RunSnmpThroughputAsync(svcForThroughput, target, community, TryGetFlagValue(args, "--throughput", 10), ct);
+            return;
+        }
 
         Console.WriteLine($"SNMP query to {target} (community: {community})...");
 
@@ -1193,6 +1199,77 @@ internal static class CliApp
             foreach (var ip in info.IpAddresses)
                 Console.WriteLine($"    {ip}");
         }
+    }
+
+    /// <summary>
+    /// Samples the router's interface counters twice and reports the throughput between the
+    /// readings. This is the only way to see traffic belonging to other devices: a capture on this
+    /// machine cannot, because a switch does not forward other devices' unicast frames to it.
+    /// </summary>
+    private static async Task RunSnmpThroughputAsync(
+        SnmpDiscoveryService service,
+        IPAddress target,
+        string community,
+        int seconds,
+        CancellationToken ct)
+    {
+        Console.WriteLine($"SNMP throughput at {target} — sampling {seconds}s apart (community: {community})");
+        Console.WriteLine(new string('-', 70));
+
+        var first = await service.GetInterfaceCountersAsync(target, community, ct);
+        if (!first.Succeeded)
+        {
+            Console.Error.WriteLine($"Could not read interface counters: {first.ErrorMessage}");
+            Console.Error.WriteLine();
+            Console.Error.WriteLine("Check that SNMP is enabled on the device and that the community string matches.");
+            Console.Error.WriteLine("Many consumer routers expose SNMP only on the LAN side, or not at all.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        Console.WriteLine($"Found {first.Interfaces.Count} interface(s); counters are " +
+                          (first.Interfaces[0].IsHighCapacity
+                              ? "64-bit (ifHC) — reliable at any speed."
+                              : "32-bit only — these wrap every few minutes on a fast link, so poll often."));
+        Console.WriteLine();
+
+        await Task.Delay(TimeSpan.FromSeconds(seconds), ct);
+
+        var second = await service.GetInterfaceCountersAsync(target, community, ct);
+        if (!second.Succeeded)
+        {
+            Console.Error.WriteLine($"Second reading failed: {second.ErrorMessage}");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        var throughput = SnmpCounterMath.Diff(first.Interfaces, second.Interfaces);
+        if (throughput.Count == 0)
+        {
+            Console.WriteLine("No interface could be differenced between the two readings.");
+            return;
+        }
+
+        Console.WriteLine($"{"Interface",-28} {"Down",12} {"Up",12}   Utilisation");
+        foreach (var item in throughput.OrderByDescending(item => item.TotalBytesPerSecond))
+        {
+            var utilisation = item.UtilisationPercent is { } percent ? $"{percent:F1}%" : "-";
+            Console.WriteLine($"{Truncate(item.Description, 28),-28} {FormatRate(item.InBytesPerSecond),12} {FormatRate(item.OutBytesPerSecond),12}   {utilisation}");
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("The WAN interface is usually the busiest one, and its counters cover every device");
+        Console.WriteLine("in the house — not just this machine.");
+    }
+
+    private static string Truncate(string value, int length) =>
+        value.Length <= length ? value : value[..(length - 1)] + "\u2026";
+
+    private static string FormatRate(double bytesPerSecond)
+    {
+        if (bytesPerSecond >= 1_000_000) return $"{bytesPerSecond / 1_000_000:F2} MB/s";
+        if (bytesPerSecond >= 1_000) return $"{bytesPerSecond / 1_000:F1} KB/s";
+        return $"{bytesPerSecond:F0} B/s";
     }
 
     private static async Task RunFlipperAsync(string[] args, IReadOnlyList<KnownDeviceDefinition> knownDevices, ITailscaleService tailscale, CancellationToken ct)
@@ -1540,6 +1617,7 @@ internal static class CliApp
         Console.WriteLine("  pcap export <device> <seconds> [<file>]    Capture PCAP via tshark");
         Console.WriteLine("  dns status|summary|queries|client <ip>     DNS filter provider");
         Console.WriteLine("  snmp <ip> [--community <c>]                SNMP query");
+        Console.WriteLine("  snmp <ip> --throughput [<seconds>]         Whole-network throughput at a router");
         Console.WriteLine("  flipper detect                             List serial ports, identify Flipper");
         Console.WriteLine("  flipper ports                              Print Flipper port name(s)");
         Console.WriteLine("  flipper info [--port <p>]                  Show connected Flipper firmware info");
