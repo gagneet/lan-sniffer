@@ -61,6 +61,44 @@ Any notation works — `aa:bb:cc:dd:ee:ff`, `AA-BB-CC-DD-EE-FF`, or bare hex.
 silently stop matching. Use the wired interface's MAC, or turn off private addressing for that
 network.
 
+## Adding two servers, worked through
+
+`docs/samples/known-devices.two-servers.json` is a complete file for a Linux server and a
+dual-homed Mac. Copy it to your user configuration and restart the application, or paste the values
+into the Settings tab.
+
+**Windows**
+
+```powershell
+$dir = "$env:APPDATA\LanInspector"
+New-Item -ItemType Directory -Force -Path $dir | Out-Null
+Copy-Item docs\samples\known-devices.two-servers.json "$dir\known-devices.json"
+```
+
+**Linux / macOS**
+
+```bash
+mkdir -p ~/.config/laninspector
+cp docs/samples/known-devices.two-servers.json ~/.config/laninspector/known-devices.json
+```
+
+Then check both are seen:
+
+```bash
+laninspector locate
+```
+
+The fields that matter, and where each value comes from:
+
+| Field | Linux server | Dual-homed Mac |
+|---|---|---|
+| `knownMacs` | `ip link show` → `link/ether` on the LAN interface | `ifconfig en0` → `ether`. **Only the wired MAC**: Wi-Fi uses a randomised address that changes |
+| `knownIps` | The LAN interface's address — ignore `docker0`, `br-*` and `veth*`, which exist only inside the machine | Both interfaces, wired and wireless |
+| `knownSubnets` | The subnet the server sits in | **Both** subnets — this is what tells the locator its off-subnet address is legitimate rather than noise |
+| `knownHostnames` | `hostname` | `scutil --get LocalHostName` |
+| `knownTailscaleNames` | `tailscale status` → the peer's name | Same, if it is on the tailnet |
+| `ssh.user` | The account you log in as | Remote Login must be on in Sharing, or probes fall back to ICMP |
+
 ## A worked example
 
 `Data/known-devices.example.json` is a template covering a server, a main router and an upstream

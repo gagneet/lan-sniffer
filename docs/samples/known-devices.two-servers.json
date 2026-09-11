@@ -1,0 +1,70 @@
+{
+  "//": "Two servers, with the values taken from ifconfig on each machine.",
+  "//install-windows": "Save as %APPDATA%\\LanInspector\\known-devices.json",
+  "//install-unix": "Save as ~/.config/laninspector/known-devices.json",
+  "//mac-mini-en1": "en1 (Wi-Fi) uses a randomised MAC that changes, so only en0's is listed.",
+  "knownDevices": [
+    {
+      "id": "home-server",
+      "displayName": "Home Server (ubuntu-svr)",
+      "deviceType": "Server",
+      "knownIps": [
+        "192.168.0.148"
+      ],
+      "knownSubnets": [
+        "192.168.0.0/24"
+      ],
+      "knownMacs": [
+        "68:1d:ef:3c:d5:45"
+      ],
+      "knownHostnames": [
+        "ubuntu-svr"
+      ],
+      "knownTailscaleNames": [
+        "ubuntu-svr"
+      ],
+      "ssh": {
+        "enabled": true,
+        "user": "gagneet",
+        "port": 22
+      },
+      "tags": [
+        "critical",
+        "server",
+        "docker"
+      ]
+    },
+    {
+      "id": "mac-mini",
+      "displayName": "Mac Mini (gagneets-mac-mini)",
+      "deviceType": "Server",
+      "knownIps": [
+        "192.168.0.154",
+        "192.168.87.118"
+      ],
+      "knownSubnets": [
+        "192.168.0.0/24",
+        "192.168.87.0/24"
+      ],
+      "knownMacs": [
+        "1c:f6:4c:51:76:d3"
+      ],
+      "knownHostnames": [
+        "gagneets-mac-mini"
+      ],
+      "knownTailscaleNames": [
+        "gagneets-mac-mini"
+      ],
+      "ssh": {
+        "enabled": true,
+        "user": "gagneet",
+        "port": 22
+      },
+      "tags": [
+        "critical",
+        "server",
+        "macos"
+      ]
+    }
+  ]
+}

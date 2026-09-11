@@ -69,7 +69,7 @@ public sealed partial class TopologyTabViewModel : ObservableObject
 
             var builder = new TopologyBuilder()
                 .AddLocalProfile(profile)
-                .AddKnownDevices(_knownDevices.KnownDevices, [])
+                .AddKnownDevices(_knownDevices.KnownDevices, [], profile)
                 .AddTailscaleStatus(ts);
 
             var snapshot = builder.Build();

@@ -826,7 +826,7 @@ internal static class CliApp
 
         var builder = new TopologyBuilder()
             .AddLocalProfile(profile)
-            .AddKnownDevices(knownDevices, [])
+            .AddKnownDevices(knownDevices, [], profile)
             .AddTailscaleStatus(ts);
 
         var snapshot = builder.Build();
@@ -1722,7 +1722,7 @@ internal static class CliApp
 
         var snapshot = new TopologyBuilder()
             .AddLocalProfile(profile)
-            .AddKnownDevices(knownDevices, [])
+            .AddKnownDevices(knownDevices, [], profile)
             .AddTailscaleStatus(ts)
             .AddFlipperSubGhzDevices(scan)
             .Build();
