@@ -114,11 +114,27 @@ public sealed class TopologyBuilder
         foreach (var known in devices)
         {
             var firstIp = known.KnownIps.FirstOrDefault();
-            if (firstIp is null || !IPAddress.TryParse(firstIp, out var ipAddr))
-                continue;
+            IPAddress? ipAddr = null;
 
-            // skip if already added from discovered
-            if (discoveredByIp.ContainsKey(firstIp))
+            if (firstIp is not null)
+            {
+                // skip if already added from discovered
+                if (discoveredByIp.ContainsKey(firstIp))
+                    continue;
+
+                IPAddress.TryParse(firstIp, out ipAddr);
+            }
+
+            var evidence = new List<string> { $"Known device config: {known.Id}" };
+            if (known.KnownSubnets.Count > 0)
+                evidence.Add($"Configured subnets: {string.Join(", ", known.KnownSubnets)}");
+            if (known.KnownMacs.Count > 0)
+                evidence.Add($"Configured MACs: {string.Join(", ", known.KnownMacs)}");
+
+            // A device configured with subnets but no address — a router known only by the range
+            // it serves — still belongs in the topology. Dropping it left the upstream routers
+            // that define the network invisible in every snapshot.
+            if (ipAddr is null && known.KnownSubnets.Count == 0)
                 continue;
 
             var nodeId = $"known:{known.Id}";
@@ -129,9 +145,10 @@ public sealed class TopologyBuilder
                 Type = NetworkNodeType.RemoteDevice,
                 Confidence = TopologyConfidence.Low,
                 PrimaryIp = ipAddr,
+                SubnetCidr = known.KnownSubnets.FirstOrDefault(),
                 IsCritical = known.IsCritical,
                 Tags = [.. known.Tags],
-                Evidence = [$"Known device config: {known.Id}"]
+                Evidence = evidence
             });
         }
 

@@ -16,6 +16,13 @@ public sealed class DnsAnalyzer : IDeviceObservingAnalyzer
 
     public event EventHandler<DeviceObservedEventArgs>? DeviceObserved;
 
+    /// <summary>
+    /// Raised for every A/AAAA answer, including those naming addresses that belong to no
+    /// captured device. Those answers used to be dropped, which threw away the only source of
+    /// names for hosts outside this LAN — the very addresses a traffic view most needs labelled.
+    /// </summary>
+    public event EventHandler<DnsNameObservedEventArgs>? NameObserved;
+
     public void Analyze(Packet packet)
     {
         var udp = packet.Extract<UdpPacket>();
@@ -55,6 +62,9 @@ public sealed class DnsAnalyzer : IDeviceObservingAnalyzer
                 {
                     continue;
                 }
+
+                NameObserved?.Invoke(this, new DnsNameObservedEventArgs(
+                    new DnsNameObservation(answer.Data, name, seenVia == "mDNS")));
 
                 UpdateByIp(answer.Data, name, seenVia, preferHostname: true);
             }

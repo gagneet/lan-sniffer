@@ -1,16 +1,44 @@
-# LanInspector
+<p align="center">
+  <img src="assets/laninspector-logo-256.png" alt="LanInspector" width="128" height="128">
+</p>
+
+<h1 align="center">LanInspector</h1>
 
 LanInspector is a .NET-based local network inspection, route diagnosis, remote access and traffic visibility tool for user-owned networks.
 
 It helps answer practical home-network questions such as:
 
 - Which network/subnet am I connected to?
+- **Which IP is my server on today, now that DHCP has moved it again?**
 - Which devices are visible from this machine?
 - Which devices are local, routed, behind NAT, or unreachable?
 - Why can I SSH from one Wi-Fi network but not another?
 - Which devices expose SSH, HTTP, SMB, RDP or other common ports?
-- What traffic can this machine actually see?
+- What traffic can this machine actually see, and which host is responsible for it?
 - What extra evidence can be added through Tailscale, Nmap, DNS providers, Wireshark/TShark, SNMP, LLDP, or a managed switch?
+
+## Finding a device whose IP keeps changing
+
+```bash
+laninspector locate home-server
+```
+
+```text
+Home Server (ubuntu-svr) (home-server)
+  Current LAN IP : 192.168.0.154
+  Found via      : ARP cache, matched by MAC
+  Confidence     : Confirmed
+  Tailscale      : 100.83.183.74  (ubuntu-svr.tail7f7c1e.ts.net)
+  Changed        : was 192.168.0.148 at 2026-09-10 21:04:11Z
+```
+
+Evidence is gathered from the ARP cache (matched by MAC), Tailscale's live peer endpoints,
+`tailscale ping`, DNS/mDNS, the last known address, and the configured address — ranked, then
+verified with a TCP probe. The first candidate that answers wins; if none answer, the strongest
+unverified candidate is reported and flagged as such.
+
+See [Tracking a Server Whose IP Keeps Changing](docs/tracking-a-moving-server-ip.md) for the full
+walkthrough, including DHCP reservations and Tailscale subnet routes.
 
 ## Projects
 
@@ -30,6 +58,10 @@ It helps answer practical home-network questions such as:
 laninspector status                          # Network summary and Tailscale state
 laninspector interfaces                      # List active network interfaces
 laninspector known                           # List known devices from config
+laninspector locate                          # Find the current LAN IP of every known device
+laninspector locate home-server              # ...or of one device (alias: whereis)
+laninspector locate home-server --probe      # Also run 'tailscale ping' to force a direct path
+laninspector locate --json                   # Machine-readable output for scripting
 laninspector check home-server               # Check reachability of a known device
 laninspector check-ip 192.168.87.243 --port 22
 laninspector route 192.168.87.243            # Route to IP
@@ -114,6 +146,8 @@ Create `known-devices.json` in the current directory, `~/.config/laninspector/`,
       "displayName": "Home Server",
       "deviceType": "Server",
       "knownIps": ["192.168.0.148", "192.168.87.243"],
+      "knownMacs": ["9c:6b:00:aa:bb:cc"],
+      "knownHostnames": ["ubuntu-svr"],
       "knownTailscaleNames": ["home-server", "homeserver"],
       "ssh": {
         "enabled": true,
@@ -126,7 +160,21 @@ Create `known-devices.json` in the current directory, `~/.config/laninspector/`,
 }
 ```
 
-Override defaults without modifying the shipped file by creating `known-devices.local.json` next to `known-devices.json`.
+| Field | Why it matters |
+|---|---|
+| `knownMacs` | The MAC does not change when the DHCP lease does, so it is the most reliable way to re-find a device. Accepts `aa:bb:cc:..`, `aa-bb-cc-..` or bare hex. |
+| `knownHostnames` | Used for DNS and mDNS (`<name>.local`) lookups when the device is on another segment and its MAC is not in the local ARP cache. |
+| `knownTailscaleNames` | Matches the tailnet peer, which supplies both the stable overlay address and live LAN endpoint evidence. |
+| `knownIps` | Starting points only — treated as the weakest evidence, because they go stale. |
+| `knownSubnets` | For routers known by the range they serve rather than a fixed address, and for telling the locator which off-subnet addresses are legitimate for a device rather than noise from a peer's container bridges. |
+
+Files are **merged by device id, with later files winning**, in this order:
+
+1. `<exe-dir>/Data/known-devices.json`, then `known-devices.local.json`
+2. `~/.config/laninspector/` (Linux/macOS) or `%APPDATA%\LanInspector\` (Windows)
+3. `./known-devices.json`, then `./known-devices.local.json`
+
+Override the shipped defaults by creating a `known-devices.local.json` containing only the fields you want to change.
 
 ## DNS Filter Integration
 
@@ -154,6 +202,27 @@ Pi-hole example:
   }
 }
 ```
+
+## Traffic View
+
+The **Traffic** tab aggregates captured packets into throughput over time and per-host totals.
+
+- **Window selector** — last 60 seconds, 15 minutes, 60 minutes or 3 hours. The live view is
+  served from one-second buckets; the longer windows from one-minute rollups, so an hour of
+  history costs sixty buckets rather than three and a half thousand.
+- **Top hosts** — every host ranked by the volume it moved inside the window, split into sent and
+  received, labelled with the device name where one is known.
+- **Device names** — rows show a name instead of a bare address wherever the app can find one:
+  the `known-devices.json` display name (matched by configured IP or by MAC, so it follows a
+  device whose lease moved), a hostname seen in the capture, this machine's own interfaces and
+  gateway, tailnet peer names for `100.x` addresses, and hostnames learned from DNS and mDNS
+  answers — which is what labels external addresses the LAN has no other name for.
+- **Drill-down** — select a host and the chart, the flow list and the peer list all narrow to that
+  address. "Show all hosts" returns to the whole-network view.
+- Quiet periods are zero-filled rather than compressed away, so the bars line up with wall-clock
+  time and a gap in traffic looks like a gap.
+
+Hover any bar for its timestamp, throughput and packet count.
 
 ## Capture Prerequisites
 
@@ -246,7 +315,8 @@ Targets: `win-x64`, `linux-x64`, `osx-x64`, `osx-arm64`. Artifacts written to `a
 - RFC1918 / CGNAT route misconfiguration detection (e.g. Eero routing 192.168.87.x upstream via 100.64.x.x).
 - **Topology snapshot** with node/edge model, confidence levels (Confirmed/High/Medium/Low/Unknown), evidence tracking, and Mermaid diagram export.
 - **Visibility explanation engine** — explains in plain English whether a machine can reach a target IP and why.
-- **Traffic flow aggregation** — live packets/sec, bytes/sec, per-flow tracking, time-series chart in WPF.
+- **Device locator** — resolves a known device's current LAN IP from the ARP cache (by MAC), Tailscale peer endpoints, `tailscale ping`, DNS/mDNS, remembered and configured addresses; verifies by TCP probe with an ICMP fallback, ranks candidates by whether this machine could plausibly reach them (so a peer's Docker bridges do not masquerade as its LAN address), reports every address a multi-homed device answers on, and records address changes over time.
+- **Traffic flow aggregation** — live packets/sec, bytes/sec, per-flow tracking, per-host top-talker ranking, and a throughput chart covering up to three hours with per-host drill-down.
 - **Passive LLDP analyzer** — captures EtherType 0x88CC frames and extracts chassis ID, port ID, system name, management address.
 - **Nmap integration** — optional ping sweep, TCP connect scan, service detection. Parses XML output.
 - **TShark / Wireshark integration** — PCAP export, packet summary, open in Wireshark.
@@ -255,11 +325,25 @@ Targets: `win-x64`, `linux-x64`, `osx-x64`, `osx-arm64`. Artifacts written to `a
 - **SNMP v2c discovery** — queries sysDescr, sysName, interface table, IP address table using SharpSnmpLib.
 - **WPF tabs** — Topology, Traffic, and DNS Filter tabs alongside the existing Devices tab.
 
+## Branding
+
+The logo and application icon are generated from a single definition so they never drift apart:
+
+```bash
+python3 scripts/generate-logo.py    # requires pillow
+```
+
+This writes `assets/laninspector-logo.png` (1024), `assets/laninspector-logo-256.png`,
+`src/LanInspector.UI/Assets/laninspector-logo.png` (in-app header) and
+`src/LanInspector.UI/Assets/laninspector.ico` (16–256px ladder, used as the window and executable
+icon). `assets/laninspector-logo.svg` is the vector master and mirrors the same geometry.
+
 ## Next Phase Roadmap
 
 - Avalonia cross-platform GUI (Linux / macOS desktop).
 - SNMP FDB table walk for switch port MAC mapping.
 - LLDP topology graph overlay (LLDP neighbours to topology nodes).
+- Persist traffic history across restarts so the hour view survives a restart of the app.
 
 ## Example Network Scenario
 
@@ -288,5 +372,6 @@ LanInspector explains this in plain English: the Eero route does not know how to
 ## Documentation
 
 - [User Guide](docs/user-guide.md)
+- [Tracking a Server Whose IP Keeps Changing](docs/tracking-a-moving-server-ip.md)
 - [Next Phase: Topology, Traffic, DNS and Integrations](docs/next-phase-topology-traffic-dns-integrations.md)
 - [Cross-platform CLI and Remote Access Prompt](docs/next-phase-cross-platform-cli-remote-access.md)

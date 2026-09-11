@@ -151,4 +151,50 @@ public sealed class TopologyBuilderTests
         var devNode = snapshot.Nodes.First(n => n.MacAddress == "aa:bb:cc:dd:ee:ff");
         Assert.Equal(TopologyConfidence.High, devNode.Confidence);
     }
+
+    [Fact]
+    public void AddKnownDevices_SubnetOnlyDevice_IsStillAddedToTheTopology()
+    {
+        // Routers are often known only by the range they serve — the Eero and the Nest mesh in
+        // this network have no fixed address in the config, only a subnet.
+        var known = new KnownDeviceDefinition
+        {
+            Id = "eero-main",
+            DisplayName = "Eero Main Router",
+            DeviceType = "Router",
+            KnownSubnets = ["192.168.4.0/24"]
+        };
+
+        var snapshot = new TopologyBuilder().AddKnownDevices([known], []).Build();
+
+        var node = Assert.Single(snapshot.Nodes);
+        Assert.Equal("Eero Main Router", node.DisplayName);
+        Assert.Equal("192.168.4.0/24", node.SubnetCidr);
+        Assert.Null(node.PrimaryIp);
+        Assert.Contains(node.Evidence, line => line.Contains("192.168.4.0/24"));
+    }
+
+    [Fact]
+    public void AddKnownDevices_DeviceWithNeitherAddressNorSubnet_IsSkipped()
+    {
+        var known = new KnownDeviceDefinition { Id = "mystery", DisplayName = "Mystery" };
+
+        Assert.Empty(new TopologyBuilder().AddKnownDevices([known], []).Build().Nodes);
+    }
+
+    [Fact]
+    public void AddKnownDevices_ConfiguredMacs_AppearAsEvidence()
+    {
+        var known = new KnownDeviceDefinition
+        {
+            Id = "home-server",
+            DisplayName = "Home Server",
+            KnownIps = ["192.168.0.154"],
+            KnownMacs = ["9c:6b:00:aa:bb:cc"]
+        };
+
+        var node = Assert.Single(new TopologyBuilder().AddKnownDevices([known], []).Build().Nodes);
+
+        Assert.Contains(node.Evidence, line => line.Contains("9c:6b:00:aa:bb:cc"));
+    }
 }

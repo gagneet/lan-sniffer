@@ -94,13 +94,16 @@ public sealed class TrafficFlowServiceTests
     }
 
     [Fact]
-    public void DataUpdated_FiredOnRecord()
+    public void DataUpdated_FiredWhenABucketCloses()
     {
         var svc = new TrafficFlowService();
         var fired = false;
         svc.DataUpdated += (_, _) => fired = true;
 
+        // Reset closes out the series, which is the cheapest deterministic trigger without a
+        // fake clock; TrafficWindowTests covers the rollover case on a controlled clock.
         svc.Record(IPAddress.Parse("1.1.1.1"), IPAddress.Parse("2.2.2.2"), 100, 80, "TCP", 100);
+        svc.Reset();
 
         Assert.True(fired);
     }
