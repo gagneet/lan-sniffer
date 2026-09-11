@@ -52,6 +52,23 @@ public sealed class TrafficChartBar
     public double Height { get; init; }
     public double Width { get; init; }
     public string Tooltip { get; init; } = "";
+
+    /// <summary>Identifies which bucket a click on this bar refers to.</summary>
+    public DateTime BucketStart { get; init; }
+
+    /// <summary>Highlights the bar the detail panel is currently describing.</summary>
+    public bool IsSelected { get; init; }
+}
+
+public sealed class TrafficContributorViewModel
+{
+    public string Source { get; init; } = "";
+    public string SourceName { get; init; } = "";
+    public string Destination { get; init; } = "";
+    public string DestinationName { get; init; } = "";
+    public string Protocol { get; init; } = "";
+    public string Bytes { get; init; } = "";
+    public long Packets { get; init; }
 }
 
 public sealed class TrafficWindowOption
@@ -117,9 +134,25 @@ public sealed partial class TrafficTabViewModel : ObservableObject, IDisposable
     [NotifyCanExecuteChangedFor(nameof(ClearTalkerSelectionCommand))]
     private TrafficTalkerViewModel? _selectedTalker;
 
+    /// <summary>The bucket the user clicked, or null while the whole window is in view.</summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(ClearBucketSelectionCommand))]
+    private DateTime? _selectedBucketStart;
+
+    [ObservableProperty]
+    private string _bucketTitle = "";
+
+    [ObservableProperty]
+    private string _bucketSummary = "";
+
+    public bool HasBucketSelection => SelectedBucketStart is not null;
+
     public ObservableCollection<TrafficFlowViewModel> TopFlows { get; } = [];
     public ObservableCollection<TrafficTalkerViewModel> TopTalkers { get; } = [];
     public ObservableCollection<TrafficPeerViewModel> SelectedTalkerPeers { get; } = [];
+
+    /// <summary>Conversations active during the clicked bucket, heaviest first.</summary>
+    public ObservableCollection<TrafficContributorViewModel> BucketContributors { get; } = [];
     public ObservableCollection<TrafficChartBar> ChartBars { get; } = [];
 
     public IReadOnlyList<TrafficWindowOption> WindowOptions { get; } =
@@ -144,7 +177,23 @@ public sealed partial class TrafficTabViewModel : ObservableObject, IDisposable
         _refreshTimer.Start();
     }
 
-    partial void OnSelectedWindowChanged(TrafficWindowOption value) => Refresh();
+    partial void OnSelectedWindowChanged(TrafficWindowOption value)
+    {
+        // Bucket boundaries differ per resolution, so a selection made at one does not address a
+        // real bucket at another.
+        SelectedBucketStart = null;
+        Refresh();
+    }
+
+    partial void OnSelectedBucketStartChanged(DateTime? value)
+    {
+        OnPropertyChanged(nameof(HasBucketSelection));
+
+        if (!_isRefreshing)
+        {
+            Refresh();
+        }
+    }
 
     partial void OnSelectedTalkerChanged(TrafficTalkerViewModel? value)
     {
@@ -202,6 +251,7 @@ public sealed partial class TrafficTabViewModel : ObservableObject, IDisposable
         RenderChart(series, peakBytesPerSecond, window);
         RefreshFlows(detail, summary);
         RefreshDetail(detail);
+        RefreshBucketSelection(window);
     }
 
     private void RefreshTalkers(TrafficWindow window)
@@ -253,8 +303,11 @@ public sealed partial class TrafficTabViewModel : ObservableObject, IDisposable
             {
                 Height = Math.Max(bucket.Bytes > 0 ? 1 : 0, bucket.BytesPerSecond / scale * ChartHeight),
                 Width = barWidth,
+                BucketStart = bucket.BucketStart,
+                IsSelected = SelectedBucketStart == bucket.BucketStart,
                 Tooltip = $"{bucket.BucketStart.ToLocalTime().ToString(timeFormat)} — " +
-                          $"{FormatBytes(bucket.BytesPerSecond)}/s ({bucket.Packets:N0} packets)"
+                          $"{FormatBytes(bucket.BytesPerSecond)}/s ({bucket.Packets:N0} packets)" +
+                          (bucket.Bytes > 0 ? "  •  click for detail" : "")
             });
         }
     }
@@ -315,6 +368,76 @@ public sealed partial class TrafficTabViewModel : ObservableObject, IDisposable
         }
     }
 
+    private void RefreshBucketSelection(TrafficWindow window)
+    {
+        BucketContributors.Clear();
+
+        if (SelectedBucketStart is not { } bucketStart)
+        {
+            BucketTitle = "";
+            BucketSummary = "";
+            return;
+        }
+
+        var detail = _trafficService.GetBucketDetail(bucketStart, window, topCount: 15);
+        if (detail is null)
+        {
+            // The bucket aged out of the retained window while it was selected.
+            BucketTitle = "That moment is no longer retained";
+            BucketSummary = $"{window.GetLabel()} only keeps so much history; pick a more recent bar.";
+            return;
+        }
+
+        var timeFormat = window == TrafficWindow.LastMinute ? "HH:mm:ss" : "HH:mm";
+        var span = window == TrafficWindow.LastMinute ? "second" : "minute";
+
+        BucketTitle = $"At {detail.BucketStart.ToLocalTime().ToString(timeFormat)} ({span})";
+        BucketSummary = detail.Contributors.Count == 0
+            ? $"{FormatBytes(detail.Bytes)} in {detail.Packets:N0} packets — no conversation detail retained."
+            : $"{FormatBytes(detail.Bytes)} in {detail.Packets:N0} packets across {detail.Contributors.Count} conversation(s)" +
+              (detail.IsTruncated
+                  ? $" — showing {FormatBytes(detail.AttributedBytes)} of it; the rest was spread over too many conversations to track."
+                  : ".");
+
+        foreach (var contributor in detail.Contributors)
+        {
+            BucketContributors.Add(new TrafficContributorViewModel
+            {
+                Source = contributor.Source,
+                SourceName = ResolveName(StripPort(contributor.Source)),
+                Destination = contributor.Destination,
+                DestinationName = ResolveName(StripPort(contributor.Destination)),
+                Protocol = contributor.Protocol,
+                Bytes = FormatBytes(contributor.Bytes),
+                Packets = contributor.Packets
+            });
+        }
+    }
+
+    /// <summary>Trims the ":port" a contributor endpoint carries, for name lookup.</summary>
+    private static string StripPort(string endpoint)
+    {
+        var separator = endpoint.LastIndexOf(':');
+        return separator > 0 ? endpoint[..separator] : endpoint;
+    }
+
+    [RelayCommand]
+    private void SelectBucket(TrafficChartBar? bar)
+    {
+        if (bar is null)
+        {
+            return;
+        }
+
+        // Clicking the selected bar again clears it, so the chart is its own toggle.
+        SelectedBucketStart = SelectedBucketStart == bar.BucketStart ? null : bar.BucketStart;
+    }
+
+    [RelayCommand(CanExecute = nameof(CanClearBucketSelection))]
+    private void ClearBucketSelection() => SelectedBucketStart = null;
+
+    private bool CanClearBucketSelection() => SelectedBucketStart is not null;
+
     [RelayCommand(CanExecute = nameof(CanClearTalkerSelection))]
     private void ClearTalkerSelection() => SelectedTalker = null;
 
@@ -325,6 +448,7 @@ public sealed partial class TrafficTabViewModel : ObservableObject, IDisposable
     {
         _trafficService.Reset();
         SelectedTalker = null;
+        SelectedBucketStart = null;
         Refresh();
     }
 

@@ -7,8 +7,11 @@ public sealed class LocalNetworkProfileProvider : ILocalNetworkProfileProvider
 {
     public LocalNetworkProfile GetCurrentProfile()
     {
+        // Loopback is always up and always matches 127.0.0.0/8, which made it appear as a real
+        // segment in the topology and let 127.x addresses rate as "on a local subnet".
         var interfaces = NetworkInterface.GetAllNetworkInterfaces()
             .Where(item => item.OperationalStatus == OperationalStatus.Up)
+            .Where(item => item.NetworkInterfaceType != NetworkInterfaceType.Loopback)
             .SelectMany(CreateInterfaceProfiles)
             .ToArray();
 

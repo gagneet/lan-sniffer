@@ -4,5 +4,15 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+
+    <!-- Stamped into every assembly so a published binary can say what it was built from.
+         Publishing with -p:SourceRevisionId=<sha> appends the commit to InformationalVersion,
+         which is what makes a stale executable obvious instead of silently missing features. -->
+    <Version>0.6.0</Version>
+    <Product>LanInspector</Product>
+
+    <!-- Symbols inside the assembly rather than as loose .pdb files, so a published build is a
+         single portable executable with nothing to leave behind when it is copied. -->
+    <DebugType>embedded</DebugType>
   </PropertyGroup>
 </Project>

@@ -85,12 +85,14 @@ public sealed class NetworkTopologySnapshot
         sb.AppendLine("graph LR");
         foreach (var node in Nodes)
         {
+            var label = Quote(node.DisplayName);
             var shape = node.Type switch
             {
-                NetworkNodeType.Gateway => $"[{node.DisplayName}]",
-                NetworkNodeType.Internet => $"(({node.DisplayName}))",
-                NetworkNodeType.ThisMachine => $"[{node.DisplayName}]",
-                _ => $"[{node.DisplayName}]"
+                NetworkNodeType.Internet => $"(({label}))",
+                NetworkNodeType.Gateway => $"{{{{{label}}}}}",
+                NetworkNodeType.ThisMachine => $"([{label}])",
+                NetworkNodeType.WirelessIoT => $"({label})",
+                _ => $"[{label}]"
             };
             sb.AppendLine($"    {SanitizeId(node.Id)}{shape}");
         }
@@ -102,11 +104,23 @@ public sealed class NetworkTopologySnapshot
                 TopologyLinkType.SubnetRoute => "==>",
                 _ => "-->"
             };
-            var label = edge.Label is not null ? $"|{edge.Label}|" : "";
+            var label = edge.Label is not null ? $"|{Quote(edge.Label)}|" : "";
             sb.AppendLine($"    {SanitizeId(edge.FromId)} {arrow}{label} {SanitizeId(edge.ToId)}");
         }
         return sb.ToString();
     }
+
+    /// <summary>
+    /// Wraps a label in quotes for Mermaid.
+    /// </summary>
+    /// <remarks>
+    /// Mermaid's parser treats brackets and parentheses inside a node label as shape syntax, so an
+    /// unquoted "This machine (Wi-Fi)" or "FAST5366LTE-A / Optus Modem" produces a diagram that
+    /// silently fails to render. Quoting every label is unconditional because the labels come from
+    /// device names, which are whatever the user typed.
+    /// </remarks>
+    private static string Quote(string label) =>
+        $"\"{label.Replace("\"", "'")}\"";
 
     private static string SanitizeId(string id) =>
         System.Text.RegularExpressions.Regex.Replace(id, @"[^a-zA-Z0-9_]", "_");

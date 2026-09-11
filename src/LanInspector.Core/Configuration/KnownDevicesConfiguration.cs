@@ -37,6 +37,84 @@ public sealed class KnownDevicesConfiguration
         return merged;
     }
 
+    /// <summary>
+    /// Writes the configuration to <paramref name="path"/>, creating the directory if needed.
+    /// </summary>
+    /// <remarks>
+    /// Written through a temporary file and moved into place, so an interrupted save cannot leave
+    /// a half-written file where the device list used to be.
+    /// </remarks>
+    public static void Save(string path, KnownDevicesConfiguration configuration)
+    {
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        var json = JsonSerializer.Serialize(configuration, new JsonSerializerOptions
+        {
+            WriteIndented = true,
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingDefault
+        });
+
+        var temporaryPath = path + ".tmp";
+        File.WriteAllText(temporaryPath, json);
+        File.Move(temporaryPath, path, overwrite: true);
+    }
+
+    /// <summary>
+    /// The example configuration compiled into the assembly, for writing out as a starting point.
+    /// It is embedded rather than shipped as a file so the application stays a single portable
+    /// executable.
+    /// </summary>
+    public static string GetExampleJson()
+    {
+        using var stream = typeof(KnownDevicesConfiguration).Assembly
+            .GetManifestResourceStream("LanInspector.Core.Data.known-devices.example.json");
+
+        if (stream is null)
+        {
+            return "{\n  \"knownDevices\": []\n}";
+        }
+
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+
+    /// <summary>
+    /// Writes the example configuration next to the user's own, without overwriting anything.
+    /// </summary>
+    /// <returns>The path written, or the existing path when one was already there.</returns>
+    public static string WriteExampleTo(string directory)
+    {
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, "known-devices.example.json");
+
+        if (!File.Exists(path))
+        {
+            File.WriteAllText(path, GetExampleJson());
+        }
+
+        return path;
+    }
+
+    /// <summary>
+    /// Where user edits are saved: per-user configuration, never the copy shipped with the
+    /// application, which an update would overwrite.
+    /// </summary>
+    public static string GetUserConfigPath()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            return Path.Combine(appData, "LanInspector", "known-devices.json");
+        }
+
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return Path.Combine(home, ".config", "laninspector", "known-devices.json");
+    }
+
     public static KnownDevicesConfiguration Load(string path)
     {
         if (!File.Exists(path))

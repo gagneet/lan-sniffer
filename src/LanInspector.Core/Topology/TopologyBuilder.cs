@@ -105,7 +105,19 @@ public sealed class TopologyBuilder
         return this;
     }
 
-    public TopologyBuilder AddKnownDevices(IEnumerable<KnownDeviceDefinition> devices, IEnumerable<Device> discovered)
+    /// <summary>
+    /// Adds configured devices, linking each to the part of the network it belongs to.
+    /// </summary>
+    /// <remarks>
+    /// Without <paramref name="profile"/> these arrive as unconnected nodes, which in a rendered
+    /// diagram float unattached and say nothing about how anything reaches them. Given the local
+    /// profile, a device on one of this machine's own subnets is linked to that interface, and
+    /// anything else is linked through the gateway — which is, after all, how it would be reached.
+    /// </remarks>
+    public TopologyBuilder AddKnownDevices(
+        IEnumerable<KnownDeviceDefinition> devices,
+        IEnumerable<Device> discovered,
+        LocalNetworkProfile? profile = null)
     {
         var discoveredByIp = discovered
             .SelectMany(d => d.IpAddresses.Select(ip => (ip, d)))
@@ -150,9 +162,50 @@ public sealed class TopologyBuilder
                 Tags = [.. known.Tags],
                 Evidence = evidence
             });
+
+            LinkKnownDevice(nodeId, ipAddr, profile);
         }
 
         return this;
+    }
+
+    private void LinkKnownDevice(string nodeId, IPAddress? address, LocalNetworkProfile? profile)
+    {
+        if (profile is null)
+        {
+            return;
+        }
+
+        var localInterface = address is null ? null : profile.FindLocalInterface(address);
+        if (localInterface is not null)
+        {
+            AddEdge(new TopologyEdge
+            {
+                FromId = $"local:{localInterface.Name}",
+                ToId = nodeId,
+                LinkType = TopologyLinkType.Layer2,
+                Confidence = TopologyConfidence.Medium,
+                Label = "same subnet",
+                Evidence = [$"Configured address is on {localInterface.Network}"]
+            });
+
+            return;
+        }
+
+        // Off this machine's subnets, so whatever path exists runs through the gateway.
+        var gateway = profile.Interfaces.FirstOrDefault(item => item.GatewayAddress is not null);
+        if (gateway?.GatewayAddress is not null)
+        {
+            AddEdge(new TopologyEdge
+            {
+                FromId = $"gw:{gateway.GatewayAddress}",
+                ToId = nodeId,
+                LinkType = TopologyLinkType.Routed,
+                Confidence = TopologyConfidence.Low,
+                Label = "routed",
+                Evidence = ["Not on a local subnet; any path runs through the gateway"]
+            });
+        }
     }
 
     public TopologyBuilder AddTailscaleStatus(TailscaleStatus tailscale)

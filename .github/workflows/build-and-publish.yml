@@ -102,6 +102,7 @@ jobs:
             -r ${{ matrix.rid }} \
             --self-contained true \
             -p:PublishSingleFile=true \
+            -p:IncludeNativeLibrariesForSelfExtract=true \
             -o artifacts/laninspector-cli-${{ matrix.rid }}
         shell: bash
 

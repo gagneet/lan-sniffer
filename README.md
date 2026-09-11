@@ -99,7 +99,9 @@ laninspector dns queries 50                  # Recent DNS queries
 laninspector dns client 192.168.0.50         # Queries for a specific client
 
 # SNMP
+laninspector snmp discover                   # Find which router answers SNMP
 laninspector snmp 192.168.0.1                # Query device via SNMP v2c
+laninspector snmp 192.168.0.1 --throughput 10  # Whole-network throughput at a router
 laninspector snmp 192.168.0.1 --community private
 ```
 
@@ -135,6 +137,10 @@ Core generates SSH commands. Platform launchers open a terminal:
 No SSH passwords are stored. Authentication uses your local SSH keys, `ssh-agent`, or Windows OpenSSH.
 
 ## Known Device Config
+
+LanInspector ships with **no devices configured**. Add your own in the **Settings** tab, which
+writes to your per-user configuration — see [Configuring Your Devices](docs/configuring-your-devices.md).
+
 
 Create `known-devices.json` in the current directory, `~/.config/laninspector/`, or the executable directory:
 
@@ -203,6 +209,62 @@ Pi-hole example:
 }
 ```
 
+## Whole-Network Traffic
+
+The Traffic tab shows what **this machine** can see, which on a switched network is its own traffic
+plus broadcast and multicast. A switch does not forward one device's unicast frames to another
+port, so promiscuous mode does not reveal a conversation between two other devices. Seeing all of
+it needs one of:
+
+| Approach | Needs | Gives |
+|---|---|---|
+| **Router interface counters (SNMP)** | SNMP enabled on the router | Total throughput per interface, including the WAN — every device's traffic combined |
+| **Port mirroring / SPAN** | A managed switch | Full packet visibility for mirrored ports |
+| **Run the capture on the router** | Custom firmware (OpenWrt and similar) | Full visibility, on supported hardware only |
+
+The first is the realistic one for consumer gear — but only from the device that carries
+*everyone's* traffic, which on a multi-router home network is rarely the one you would guess. Let
+the application find it:
+
+```bash
+laninspector snmp discover
+```
+
+It probes each interface's gateway, every hop on the way out (so upstream routers on a double-NAT
+network are included), and anything the configuration calls a router, then reports which answered
+and the exact command to run against it:
+
+```text
+  [no]  192.168.87.1     default gateway on Wi-Fi
+  [YES] 192.168.4.1      upstream hop toward the internet
+         community 'public', 6 interface(s), 64-bit counters
+
+Usable for whole-network throughput:
+  laninspector snmp 192.168.4.1 --throughput 10
+```
+
+Then:
+
+```bash
+laninspector snmp 192.168.4.1 --throughput 10
+```
+
+```text
+Interface                            Down           Up   Utilisation
+wan                              4.21 MB/s    412 KB/s   3.4%
+lan1                             1.02 MB/s   1.98 MB/s   1.6%
+```
+
+If nothing answers, the router does not expose SNMP. Most consumer mesh systems — Eero, Google
+Nest, Deco — expose none at all and cannot be made to, so this is a hardware fact rather than a
+configuration problem. What remains is a managed switch with port mirroring, firmware you control
+(OpenWrt and similar), or, for per-device visibility without byte counts, pointing the LAN's DNS at
+a Pi-hole or AdGuard Home instance and using the DNS Filter tab.
+
+Note also that interface counters are **totals per interface**: they show how much crossed the
+router, not which device sent it. Per-device breakdown needs the managed switch or router-side
+capture.
+
 ## Traffic View
 
 The **Traffic** tab aggregates captured packets into throughput over time and per-host totals.
@@ -217,8 +279,11 @@ The **Traffic** tab aggregates captured packets into throughput over time and pe
   device whose lease moved), a hostname seen in the capture, this machine's own interfaces and
   gateway, tailnet peer names for `100.x` addresses, and hostnames learned from DNS and mDNS
   answers — which is what labels external addresses the LAN has no other name for.
-- **Drill-down** — select a host and the chart, the flow list and the peer list all narrow to that
-  address. "Show all hosts" returns to the whole-network view.
+- **Drill-down by host** — select a host and the chart, the flow list and the peer list all narrow
+  to that address. "Show all hosts" returns to the whole-network view.
+- **Drill-down by moment** — click a bar to see the conversations that made up that second or
+  minute. Click it again to clear. Attribution is capped per bucket and says so when it truncates,
+  rather than quietly under-reporting.
 - Quiet periods are zero-filled rather than compressed away, so the bars line up with wall-clock
   time and a gap in traffic looks like a gap.
 
@@ -247,27 +312,53 @@ The WPF project (`LanInspector.UI`) requires Windows or the `EnableWindowsTarget
 
 ## Publishing
 
-### Windows WPF
+One command builds everything — it runs the tests first, clears `artifacts/`, publishes
+self-contained single-file executables, and zips each one:
 
 ```powershell
-.\scripts\publish-windows.ps1
+.\scripts\publish-all.ps1
 ```
-
-Output: `artifacts\LanInspector-win-x64` (Npcap must be installed separately on the target machine.)
-
-### CLI (all targets)
-
-```powershell
-.\scripts\publish-cli.ps1
-```
-
-or on Linux/macOS:
 
 ```bash
-./scripts/publish-cli.sh
+./scripts/publish-all.sh          # CLI targets only; the WPF app needs Windows
 ```
 
-Targets: `win-x64`, `linux-x64`, `osx-x64`, `osx-arm64`. Artifacts written to `artifacts/`.
+| Artifact | Contents |
+|---|---|
+| `artifacts\LanInspector-win-x64` | WPF desktop application (Windows only) |
+| `artifacts\laninspector-cli-win-x64` | CLI |
+| `artifacts\laninspector-cli-linux-x64` | CLI |
+| `artifacts\laninspector-cli-osx-x64`, `-osx-arm64` | CLI |
+
+`-SkipTests` publishes without testing first; `-CliOnly` skips the desktop application.
+
+Each folder holds **exactly one file**. The vendor list and the example configuration are compiled
+into the assembly and debug symbols are embedded, so `LanInspector.UI.exe` can be copied to another
+machine on its own and will work — no `Data` folder, no `.pdb` files. Dropping a `Data\oui.csv`
+next to the executable still adds vendor prefixes to the built-in list if you want more of them.
+
+### Check what you are running
+
+Every binary is stamped with the commit it was built from:
+
+```text
+> .\artifacts\laninspector-cli-win-x64\laninspector.exe version
+LanInspector 0.6.0
+  commit:  db518e3
+  runtime: .NET 8.0.31
+  os:      Windows (X64)
+  built:   2026-09-11 17:57
+```
+
+Worth checking whenever a flag "does nothing": a published executable keeps working after the
+source moves on, and an older build simply ignores options it does not know rather than reporting
+them as unrecognised. `-dirty` on the commit means it was built from a working tree with
+uncommitted changes.
+
+The individual scripts (`publish-windows.ps1`, `publish-cli.ps1`, `publish-cli.sh`) still exist for
+publishing one thing at a time.
+
+Npcap must be installed separately on the target Windows machine for packet capture.
 
 ## Security and Privacy
 
@@ -373,5 +464,7 @@ LanInspector explains this in plain English: the Eero route does not know how to
 
 - [User Guide](docs/user-guide.md)
 - [Tracking a Server Whose IP Keeps Changing](docs/tracking-a-moving-server-ip.md)
+- [Configuring Your Devices](docs/configuring-your-devices.md)
+- [Flattening a Multi-Router Home Network](docs/network-topology-recommendations.md)
 - [Next Phase: Topology, Traffic, DNS and Integrations](docs/next-phase-topology-traffic-dns-integrations.md)
 - [Cross-platform CLI and Remote Access Prompt](docs/next-phase-cross-platform-cli-remote-access.md)

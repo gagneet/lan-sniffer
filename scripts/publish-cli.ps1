@@ -20,6 +20,7 @@ foreach ($rid in $targets) {
         -r $rid `
         --self-contained true `
         -p:PublishSingleFile=true `
+        -p:IncludeNativeLibrariesForSelfExtract=true `
         -o $output
 
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

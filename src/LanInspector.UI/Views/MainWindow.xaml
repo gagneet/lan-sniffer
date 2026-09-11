@@ -11,6 +11,7 @@
         WindowStartupLocation="CenterScreen">
     <Window.Resources>
         <converters:NonEmptyToVisibilityConverter x:Key="NonEmptyToVisibility" />
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
     </Window.Resources>
     <DockPanel Background="#EEF2F5">
         <Border DockPanel.Dock="Top"
@@ -172,6 +173,12 @@
                                             <TextBlock Text="{Binding AddressChange}" Foreground="#B25C00" FontSize="11"
                                                        Visibility="{Binding AddressChange, Converter={StaticResource NonEmptyToVisibility}}" />
                                         </StackPanel>
+                                        <TextBlock Text="{Binding Diagnosis}"
+                                                   Foreground="#B25C00"
+                                                   FontSize="11"
+                                                   TextWrapping="Wrap"
+                                                   Margin="0,3,0,0"
+                                                   Visibility="{Binding Diagnosis, Converter={StaticResource NonEmptyToVisibility}}" />
                                     </StackPanel>
                                 </DataTemplate>
                             </ListBox.ItemTemplate>
@@ -377,10 +384,71 @@
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Border Width="{Binding Width}" Height="{Binding Height}" Background="#3A86D4" Margin="1,0" ToolTip="{Binding Tooltip}" VerticalAlignment="Bottom" />
+                                            <!-- A button rather than a Border so each bar is clickable and keyboard reachable. -->
+                                            <Button Width="{Binding Width}"
+                                                    Height="{Binding Height}"
+                                                    Margin="1,0"
+                                                    Padding="0"
+                                                    BorderThickness="0"
+                                                    Cursor="Hand"
+                                                    ToolTip="{Binding Tooltip}"
+                                                    VerticalAlignment="Bottom"
+                                                    Command="{Binding DataContext.SelectBucketCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                    CommandParameter="{Binding}">
+                                                <Button.Style>
+                                                    <Style TargetType="Button">
+                                                        <Setter Property="Background" Value="#3A86D4" />
+                                                        <Setter Property="Template">
+                                                            <Setter.Value>
+                                                                <ControlTemplate TargetType="Button">
+                                                                    <Border Background="{TemplateBinding Background}" />
+                                                                </ControlTemplate>
+                                                            </Setter.Value>
+                                                        </Setter>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                                <Setter Property="Background" Value="#F08C00" />
+                                                            </DataTrigger>
+                                                            <Trigger Property="IsMouseOver" Value="True">
+                                                                <Setter Property="Background" Value="#6FB1EC" />
+                                                            </Trigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Button.Style>
+                                            </Button>
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
+                            </DockPanel>
+                        </Border>
+
+                        <Border DockPanel.Dock="Top" Background="White" BorderBrush="#F0C078" BorderThickness="1" CornerRadius="6" Padding="10" Margin="0,0,0,8"
+                                Visibility="{Binding HasBucketSelection, Converter={StaticResource BoolToVisibility}}">
+                            <DockPanel>
+                                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,6">
+                                    <TextBlock Text="{Binding BucketTitle}" FontWeight="SemiBold" />
+                                    <TextBlock Text="{Binding BucketSummary}" Foreground="#5B6875" Margin="10,0,0,0" TextTrimming="CharacterEllipsis" />
+                                    <Button Content="Close" Command="{Binding ClearBucketSelectionCommand}" Margin="14,0,0,0" Padding="8,1" />
+                                </StackPanel>
+                                <DataGrid ItemsSource="{Binding BucketContributors}"
+                                          AutoGenerateColumns="False"
+                                          IsReadOnly="True"
+                                          CanUserAddRows="False"
+                                          GridLinesVisibility="Horizontal"
+                                          HeadersVisibility="Column"
+                                          RowHeaderWidth="0"
+                                          BorderThickness="0"
+                                          MaxHeight="150">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Source device" Binding="{Binding SourceName}" Width="150" />
+                                        <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="175" FontFamily="Consolas" />
+                                        <DataGridTextColumn Header="Dest device" Binding="{Binding DestinationName}" Width="150" />
+                                        <DataGridTextColumn Header="Destination" Binding="{Binding Destination}" Width="175" FontFamily="Consolas" />
+                                        <DataGridTextColumn Header="Protocol" Binding="{Binding Protocol}" Width="70" />
+                                        <DataGridTextColumn Header="Bytes" Binding="{Binding Bytes}" Width="85" />
+                                        <DataGridTextColumn Header="Packets" Binding="{Binding Packets}" Width="70" />
+                                    </DataGrid.Columns>
+                                </DataGrid>
                             </DockPanel>
                         </Border>
 
@@ -556,6 +624,73 @@
                                 </DockPanel>
                             </Border>
                         </Grid>
+                    </DockPanel>
+                </TabItem>
+
+                <!-- Settings Tab -->
+                <TabItem Header="Settings">
+                    <DockPanel DataContext="{Binding SettingsTab}" Margin="0,6,0,0">
+                        <Border DockPanel.Dock="Top" Background="White" BorderBrush="#D5DEE7" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,8">
+                            <StackPanel>
+                                <TextBlock Text="Known devices" FontWeight="SemiBold" FontSize="15" />
+                                <TextBlock Foreground="#5B6875" TextWrapping="Wrap" Margin="0,4,0,0"
+                                           Text="Devices tagged Critical are pinned to the panel at the top of the window. A MAC address is the most useful field: it does not change when the DHCP lease does, so it is how a device is re-found after it moves." />
+                                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                    <Button Content="Add device" Command="{Binding AddDeviceCommand}" />
+                                    <Button Content="Remove selected" Command="{Binding RemoveDeviceCommand}" Margin="6,0,0,0" />
+                                    <Button Content="Save" Command="{Binding SaveCommand}" Margin="18,0,0,0" Padding="14,2" FontWeight="SemiBold" />
+                                    <Button Content="Open config folder" Command="{Binding OpenConfigFolderCommand}" Margin="6,0,0,0" />
+                                    <Button Content="Write example file" Command="{Binding WriteExampleConfigCommand}" Margin="6,0,0,0" />
+                                </StackPanel>
+                                <TextBlock Text="{Binding StatusText}" Foreground="#405162" TextWrapping="Wrap" Margin="0,8,0,0" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border DockPanel.Dock="Bottom" Background="White" BorderBrush="#D5DEE7" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,8,0,0">
+                            <StackPanel>
+                                <TextBlock Text="Configuration files" FontWeight="SemiBold" />
+                                <TextBlock Foreground="#8494A3" FontSize="11" Margin="0,2,0,6"
+                                           Text="Merged by device id, later files winning. Saving writes to your user configuration so an application update cannot overwrite it." />
+                                <ItemsControl ItemsSource="{Binding SearchPaths}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding}" FontFamily="Consolas" FontSize="11" Foreground="#5B6875" Margin="0,1" />
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <TextBlock Margin="0,6,0,0" FontSize="11" Foreground="#405162">
+                                    <Run Text="Saves go to:" />
+                                    <Run Text="{Binding UserConfigPath, Mode=OneWay}" FontFamily="Consolas" FontWeight="SemiBold" />
+                                </TextBlock>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Background="White" BorderBrush="#D5DEE7" BorderThickness="1" CornerRadius="6">
+                            <DataGrid ItemsSource="{Binding Devices}"
+                                      SelectedItem="{Binding SelectedDevice}"
+                                      AutoGenerateColumns="False"
+                                      CanUserAddRows="False"
+                                      SelectionMode="Single"
+                                      GridLinesVisibility="All"
+                                      HeadersVisibility="Column"
+                                      RowHeaderWidth="0"
+                                      BorderThickness="0">
+                                <DataGrid.Columns>
+                                    <DataGridCheckBoxColumn Header="Critical" Binding="{Binding IsCritical, UpdateSourceTrigger=PropertyChanged}" Width="60" />
+                                    <DataGridTextColumn Header="Display name" Binding="{Binding DisplayName, UpdateSourceTrigger=PropertyChanged}" Width="160" />
+                                    <DataGridTextColumn Header="Type" Binding="{Binding DeviceType, UpdateSourceTrigger=PropertyChanged}" Width="80" />
+                                    <DataGridTextColumn Header="MAC addresses" Binding="{Binding KnownMacs, UpdateSourceTrigger=PropertyChanged}" Width="160" FontFamily="Consolas" />
+                                    <DataGridTextColumn Header="IP addresses" Binding="{Binding KnownIps, UpdateSourceTrigger=PropertyChanged}" Width="150" FontFamily="Consolas" />
+                                    <DataGridTextColumn Header="Subnets" Binding="{Binding KnownSubnets, UpdateSourceTrigger=PropertyChanged}" Width="130" FontFamily="Consolas" />
+                                    <DataGridTextColumn Header="Hostnames" Binding="{Binding KnownHostnames, UpdateSourceTrigger=PropertyChanged}" Width="130" />
+                                    <DataGridTextColumn Header="Tailscale names" Binding="{Binding KnownTailscaleNames, UpdateSourceTrigger=PropertyChanged}" Width="130" />
+                                    <DataGridCheckBoxColumn Header="SSH" Binding="{Binding SshEnabled, UpdateSourceTrigger=PropertyChanged}" Width="45" />
+                                    <DataGridTextColumn Header="SSH user" Binding="{Binding SshUser, UpdateSourceTrigger=PropertyChanged}" Width="100" />
+                                    <DataGridTextColumn Header="Port" Binding="{Binding SshPort, UpdateSourceTrigger=PropertyChanged}" Width="55" />
+                                    <DataGridTextColumn Header="Tags" Binding="{Binding Tags, UpdateSourceTrigger=PropertyChanged}" Width="*" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Border>
                     </DockPanel>
                 </TabItem>
 

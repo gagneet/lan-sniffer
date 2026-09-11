@@ -8,16 +8,48 @@ unreachable when it was in fact fine.
 
 ## The network
 
+A traceroute settles the shape of it:
+
+```text
+> tracert bing.com
+  1     4 ms  192.168.87.1      <- this machine's gateway
+  2     5 ms  192.168.4.1       <- a second router above it
+  3    13 ms  100.96.16.1       <- CGNAT, the ISP side
+  4    11 ms  150.171.27.10
+```
+
+`192.168.87.1` and `192.168.4.1` both appear, **in the same trace**. They are not one router whose
+address changes across reboots — they are two routers, one behind the other, and which one answers
+depends on which you ask. Counting the ISP's CGNAT layer, outbound traffic crosses three NATs:
+
 ```text
 NBN / Internet
-  └── Eero router            192.168.87.1  or  192.168.4.1   (changes across reboots)
-        │                                                     serves 192.168.87.0/24
-        │     └── gagneets-mac-mini  en1 (Wi-Fi)  192.168.87.118
-        └── FAST5366LTE-A    192.168.0.1                     (Optus modem-router, DHCP server)
-              └── 6-port unmanaged LAN switch
-                    ├── ubuntu-svr          enp2s0  192.168.0.148   68:1d:ef:3c:d5:45
-                    └── gagneets-mac-mini   en0     192.168.0.154   1c:f6:4c:51:76:d3
+  └── CGNAT 100.96.16.1                      (ISP — inbound connections cannot cross this)
+        └── router  192.168.4.1
+              └── router  192.168.87.1       serves 192.168.87.0/24
+                    ├── this machine                        192.168.87.x
+                    ├── gagneets-mac-mini  en1 (Wi-Fi)      192.168.87.118
+                    └── FAST5366LTE-A      192.168.0.1      serves 192.168.0.0/24
+                          └── 6-port unmanaged LAN switch
+                                ├── ubuntu-svr         enp2s0  192.168.0.148  68:1d:ef:3c:d5:45
+                                └── gagneets-mac-mini  en0     192.168.0.154  1c:f6:4c:51:76:d3
 ```
+
+The FAST5366LTE-A is **below** the mesh, not above it, and is not in the path to the internet at
+all — which is why querying `192.168.0.1` says nothing about the traffic leaving the house.
+
+Whether it hangs off `192.168.87.1` or off `192.168.4.1` the trace does not say. To find out, look
+at its WAN address in its admin pages: whichever subnet that address sits in is its parent.
+
+### Why `ubuntu-svr` is unreachable from here and the Mac Mini is not
+
+The client is on `192.168.87.0/24`. `ubuntu-svr` is on `192.168.0.0/24`, one NAT layer *further
+down*, behind the FAST5366LTE-A — and a NAT router does not carry inbound connections from its WAN
+side to its LAN. The Mac Mini is reachable only because its Wi-Fi interface sits on
+`192.168.87.0/24` alongside the client; its `192.168.0.154` address is just as unreachable as the
+server's.
+
+So this is not a server fault and not a fixable routing accident: it is what the topology does.
 
 The Mac Mini is **dual-homed**: wired into the switch on `192.168.0.0/24` *and* on Wi-Fi to the
 Eero on `192.168.87.0/24`. It is the one machine sitting on both sides of the boundary that makes
@@ -36,7 +68,7 @@ Two separate things move here, and it helps to keep them apart:
 | `ubuntu-svr`'s address inside `192.168.0.0/24` | The FAST5366LTE-A hands out a new lease after a power cycle | A DHCP reservation on the FAST5366LTE-A, keyed to `68:1d:ef:3c:d5:45` |
 | The Mac Mini's `en0` address | Same DHCP server, same cause | A reservation keyed to `1c:f6:4c:51:76:d3` |
 | The Mac Mini's `en1` address | The Eero's DHCP, plus macOS private Wi-Fi addressing | Turn off "Private Wi-Fi Address" for that network if you want a stable reservation — otherwise track it by hostname |
-| The Eero's own address (`192.168.87.1` ↔ `192.168.4.1`) | The Eero picks a different private range depending on what it sees upstream at boot | Pin the Eero's LAN subnet in its app, or leave it and let the locator track it |
+| Which router address you see (`192.168.87.1` vs `192.168.4.1`) | Nothing moves — these are two routers stacked one behind the other, so the answer depends on which one you queried | Nothing to fix; see the traceroute above |
 
 Note the Mac Mini's `en1` MAC (`86:61:7a:c6:1f:7f`) has the locally-administered bit set — it is a
 randomised Wi-Fi address, not the hardware one. Only `en0`'s MAC is worth putting in
@@ -232,6 +264,59 @@ it as unconfirmed even while it sits there answering pings. When no probed port 
 locator falls back to an ICMP echo; a device verified that way is reported at `High` confidence
 rather than `Confirmed`, and the candidate is marked `[ping only]` — present, but no service
 proven.
+
+## "Not reachable" when the server is plainly running
+
+A device can be up, busy and perfectly healthy and still show as unreachable, because reachability
+is a property of the network *between* the two machines, not of either one.
+
+The giveaway is which devices work. On this network the Mac Mini reports online while `ubuntu-svr`
+does not, and the only difference between them is that the Mac Mini has a second interface on
+`192.168.87.0/24`:
+
+```text
+ubuntu-svr           enp2s0  192.168.0.148    (1.2 GB in, 653 MB out — plainly alive)
+gagneets-mac-mini    en0     192.168.0.154
+                     en1     192.168.87.118   <-- the reason it is reachable
+```
+
+If the machine running LanInspector is on `192.168.87.x`, then it shares a subnet with the Mac
+Mini's Wi-Fi interface and can reach it directly — while `192.168.0.148` sits behind the
+FAST5366LTE-A, which the Eero has no route into. Nothing is wrong with the server; there is simply
+no path from that side of the house to that subnet. Tailscale still works because it does not use
+that path at all.
+
+The critical-devices panel now says so rather than leaving "Not reachable" to be interpreted:
+
+```text
+This machine is on 192.168.87.0/24; 192.168.0.148 is on 192.168.0.0/24. Those are different
+subnets, and the router between them does not carry traffic from this side to that one. Connect
+to the same network as the target, add a route, or reach it over Tailscale.
+Tailscale reaches it now at ubuntu-svr.
+```
+
+When the target *is* on the same subnet and still does not answer, the message says the opposite —
+that the route is fine and the service or a host firewall is the thing to look at. The two cases
+need opposite responses, so the app names which one it is.
+
+The SSH command follows the same logic: when the LAN address is unconfirmed, the button offers the
+Tailscale name instead, because a command that works beats one that matches the config.
+
+### Confirming it
+
+```bash
+laninspector visibility 192.168.0.148    # explains the path in full
+laninspector locate home-server          # shows every candidate and what answered
+```
+
+If the diagnosis is right, the fix is one of:
+
+- run LanInspector from a machine on `192.168.0.0/24`;
+- advertise `192.168.0.0/24` into the tailnet from `ubuntu-svr`, so the whole subnet is reachable
+  from anywhere (`sudo tailscale up --advertise-routes=192.168.0.0/24`, then approve it);
+- or add a static route on the Eero toward `192.168.0.0/24` via the FAST5366LTE-A, if it allows one.
+
+The middle option is the one that keeps working from outside the house too.
 
 ## Keeping a log of the moves
 

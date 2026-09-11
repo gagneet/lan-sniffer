@@ -1,0 +1,73 @@
+using System.Net;
+using LanInspector.Core.Network;
+
+namespace LanInspector.Core.Diagnostics;
+
+/// <summary>
+/// Turns a failed reachability check into a sentence that says what to do about it.
+/// </summary>
+/// <remarks>
+/// "Not reachable" on its own sends people looking for a fault on the target machine, when the
+/// usual cause on a multi-router home network is that the machine running this application sits on
+/// a different subnet with no route to the target. That is a property of the network between them,
+/// not of either device, and the two cases need opposite responses.
+/// </remarks>
+public static class ReachabilityExplainer
+{
+    public static string Explain(
+        IPAddress target,
+        LocalNetworkProfile profile,
+        RouteDecision? route,
+        bool serviceAnswered,
+        IPAddress? tailscaleAddress = null,
+        string? tailscaleName = null)
+    {
+        if (serviceAnswered)
+        {
+            return string.Empty;
+        }
+
+        var overlay = DescribeOverlay(tailscaleAddress, tailscaleName);
+        var localInterface = profile.FindLocalInterface(target);
+
+        if (localInterface is not null)
+        {
+            // Same segment: the network is not the problem, so the service or a host firewall is.
+            return $"{target} is on this machine's own subnet ({localInterface.Network}), so the route is fine — " +
+                   $"nothing answered on the probed port. Check the service is running and the host firewall allows it." +
+                   overlay;
+        }
+
+        var misconfiguration = route is null ? null : RouteHelpers.DetectMisconfiguration(route);
+        if (misconfiguration is not null)
+        {
+            return misconfiguration.UserFriendly + overlay;
+        }
+
+        var localNetworks = profile.Interfaces.Count == 0
+            ? "no active IPv4 interface"
+            : string.Join(", ", profile.Interfaces.Select(item => item.Network.ToString()).Distinct());
+
+        return $"This machine is on {localNetworks}; {target} is on {DescribeSubnet(target)}. " +
+               "Those are different subnets, and the router between them does not carry traffic from this side to that one. " +
+               "Connect to the same network as the target, add a route, or reach it over Tailscale." +
+               overlay;
+    }
+
+    private static string DescribeOverlay(IPAddress? tailscaleAddress, string? tailscaleName)
+    {
+        if (tailscaleAddress is null)
+        {
+            return string.Empty;
+        }
+
+        var via = string.IsNullOrWhiteSpace(tailscaleName) ? tailscaleAddress.ToString() : tailscaleName;
+        return $" Tailscale reaches it now at {via}.";
+    }
+
+    private static string DescribeSubnet(IPAddress address)
+    {
+        var bytes = address.GetAddressBytes();
+        return bytes.Length == 4 ? $"{bytes[0]}.{bytes[1]}.{bytes[2]}.0/24" : address.ToString();
+    }
+}

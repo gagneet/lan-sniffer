@@ -197,4 +197,67 @@ public sealed class TopologyBuilderTests
 
         Assert.Contains(node.Evidence, line => line.Contains("9c:6b:00:aa:bb:cc"));
     }
+
+    [Fact]
+    public void ToMermaid_LabelsWithParenthesesOrSlashes_AreQuoted()
+    {
+        // Unquoted, "This machine (eth0)" reads as shape syntax to Mermaid's parser and the whole
+        // diagram silently fails to render.
+        var known = new KnownDeviceDefinition
+        {
+            Id = "modem",
+            DisplayName = "FAST5366LTE-A / Optus Modem",
+            KnownIps = ["192.168.0.1"]
+        };
+
+        var mermaid = new TopologyBuilder()
+            .AddLocalProfile(BuildProfile("192.168.1.100", "192.168.1.1"))
+            .AddKnownDevices([known], [])
+            .Build()
+            .ToMermaid();
+
+        Assert.Contains("\"This machine (eth0)\"", mermaid);
+        Assert.Contains("\"FAST5366LTE-A / Optus Modem\"", mermaid);
+        Assert.DoesNotContain("[This machine (eth0)]", mermaid);
+    }
+
+    [Fact]
+    public void ToMermaid_EdgeLabels_AreQuotedToo()
+    {
+        var mermaid = new TopologyBuilder()
+            .AddLocalProfile(BuildProfile("192.168.1.100", "192.168.1.1"))
+            .Build()
+            .ToMermaid();
+
+        Assert.Contains("|\"default route\"|", mermaid);
+    }
+
+    [Fact]
+    public void AddKnownDevices_WithTheLocalProfile_LinksInsteadOfLeavingOrphans()
+    {
+        var profile = BuildProfile("192.168.1.100", "192.168.1.1");
+        var onSubnet = new KnownDeviceDefinition { Id = "nas", DisplayName = "NAS", KnownIps = ["192.168.1.50"] };
+        var elsewhere = new KnownDeviceDefinition { Id = "server", DisplayName = "Server", KnownIps = ["192.168.0.148"] };
+
+        var snapshot = new TopologyBuilder()
+            .AddLocalProfile(profile)
+            .AddKnownDevices([onSubnet, elsewhere], [], profile)
+            .Build();
+
+        // A device on this machine's own subnet hangs off the interface...
+        Assert.Contains(snapshot.Edges, edge => edge.ToId == "known:nas" && edge.FromId == "local:eth0");
+        // ...and anything else is reached through the gateway.
+        Assert.Contains(snapshot.Edges, edge => edge.ToId == "known:server" && edge.FromId.StartsWith("gw:"));
+    }
+
+    [Fact]
+    public void AddKnownDevices_WithoutTheProfile_AddsNoEdges()
+    {
+        var known = new KnownDeviceDefinition { Id = "nas", DisplayName = "NAS", KnownIps = ["192.168.1.50"] };
+
+        var snapshot = new TopologyBuilder().AddKnownDevices([known], []).Build();
+
+        Assert.Single(snapshot.Nodes);
+        Assert.Empty(snapshot.Edges);
+    }
 }

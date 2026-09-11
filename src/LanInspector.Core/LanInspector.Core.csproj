@@ -9,6 +9,14 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Embedded rather than copied beside the executable, so a published single-file build is
+         genuinely one portable file. Copying only the .exe used to leave vendor lookup silently
+         returning nothing, because its data was in a folder left behind. -->
+    <EmbeddedResource Include="Data\oui.csv" />
+    <EmbeddedResource Include="Data\known-devices.example.json" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="PacketDotNet" Version="1.4.8" />
     <PackageReference Include="SharpPcap" Version="6.3.1" />
     <PackageReference Include="Lextm.SharpSnmpLib" Version="12.5.2" />

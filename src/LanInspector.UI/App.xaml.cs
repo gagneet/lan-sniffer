@@ -36,7 +36,10 @@ public partial class App : Application
             new DhcpAnalyzer(devices)
         };
 
+        // The built-in list travels inside the executable; a Data\oui.csv placed beside it is an
+        // optional addition, loaded second so a user's own entries win.
         var vendorLookup = new OuiVendorLookup();
+        vendorLookup.LoadBuiltIn();
         vendorLookup.LoadCsv(Path.Combine(AppContext.BaseDirectory, "Data", "oui.csv"));
 
         var dataDirectory = Path.Combine(AppContext.BaseDirectory, "Data");
@@ -51,6 +54,7 @@ public partial class App : Application
             Path.Combine(dataDirectory, "known-devices.local.json"),
             Path.Combine(userConfigDirectory, "known-devices.json"),
             Path.Combine(userConfigDirectory, "known-devices.local.json"));
+
         var localNetworkProvider = new LocalNetworkProfileProvider();
 
         var tailscale = new TailscaleCliService();
@@ -114,6 +118,26 @@ public partial class App : Application
             deviceLocator,
             nameRegistry,
             dnsService);
+
+        // Editing devices in the app writes to the per-user configuration, never to the copy
+        // shipped beside the executable, which an update would overwrite.
+        var searchPaths = new[]
+        {
+            Path.Combine(dataDirectory, "known-devices.json"),
+            Path.Combine(dataDirectory, "known-devices.local.json"),
+            Path.Combine(userConfigDirectory, "known-devices.json"),
+            Path.Combine(userConfigDirectory, "known-devices.local.json")
+        };
+
+        viewModel.AttachSettingsTab(new SettingsTabViewModel(
+            knownDevices,
+            searchPaths,
+            () =>
+            {
+                var reloaded = KnownDevicesConfiguration.LoadMany(searchPaths);
+                nameRegistry.Invalidate();
+                viewModel.ReloadKnownDevices(reloaded.KnownDevices);
+            }));
 
         var mainWindow = new MainWindow(viewModel);
         mainWindow.Show();
