@@ -129,57 +129,212 @@
 
                 <Border Grid.Column="1" Background="White" BorderBrush="#D5DEE7" BorderThickness="1" CornerRadius="6" Padding="14">
                     <DockPanel>
-                        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,10">
-                            <TextBlock Text="Critical devices" FontWeight="SemiBold" FontSize="15" VerticalAlignment="Center" />
-                            <TextBlock Text="{Binding CriticalDevicesStatusText}" Foreground="#5B6875" Margin="12,0,0,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="420" />
-                            <Button Content="Check Now" Command="{Binding RefreshCriticalDevicesCommand}" Margin="12,0,0,0" />
-                            <Button Content="Copy SSH" Command="{Binding CopyCriticalSshCommandCommand}" />
-                            <Button Content="Open SSH" Command="{Binding OpenCriticalSshCommand}" />
-                            <Button Content="Copy IP" Command="{Binding CopyCriticalIpCommand}" />
+                        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,12">
+                            <TextBlock Text="Critical devices" FontWeight="SemiBold" FontSize="15" Foreground="#17212B" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding CriticalDevicesStatusText}" Foreground="#5B6875" Margin="12,0,0,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="300" />
+                            <Button Content="Check now" Command="{Binding RefreshCriticalDevicesCommand}" Margin="12,0,0,0" />
+                            <Button Content="Copy IP" Command="{Binding CopyCriticalIpCommand}" Margin="6,0,0,0" />
+                            <Button Content="Copy SSH" Command="{Binding CopyCriticalSshCommandCommand}" Margin="6,0,0,0" />
+                            <Button Content="Open SSH" Command="{Binding OpenCriticalSshCommand}" Margin="6,0,0,0" />
                         </StackPanel>
+
+                        <!-- Labels sit here once. As a prefix on every row they cost a whole line
+                             per device, which is what pushed the address out of view. -->
+                        <Border DockPanel.Dock="Top" BorderBrush="#E4EBF1" BorderThickness="0,0,0,1" Padding="8,0,8,6">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="152" />
+                                    <ColumnDefinition Width="168" />
+                                    <ColumnDefinition Width="150" />
+                                    <ColumnDefinition Width="26" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Device" FontSize="11" FontWeight="SemiBold" Foreground="#5B6875" />
+                                <TextBlock Grid.Column="1" Text="LAN address" FontSize="11" FontWeight="SemiBold" Foreground="#5B6875" />
+                                <TextBlock Grid.Column="2" Text="Tailscale" FontSize="11" FontWeight="SemiBold" Foreground="#5B6875" />
+                                <TextBlock Grid.Column="3" Text="Status" FontSize="11" FontWeight="SemiBold" Foreground="#5B6875" />
+                            </Grid>
+                        </Border>
+
                         <ListBox ItemsSource="{Binding CriticalDevices}"
                                  SelectedItem="{Binding SelectedCriticalDevice}"
                                  HorizontalContentAlignment="Stretch"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                                  BorderThickness="0"
-                                 MaxHeight="190">
+                                 MaxHeight="230">
+                            <!-- The default container adds padding and a blue selection wash. Both
+                                 have to go: the padding shifts every row out of line with the
+                                 column headers above, and the wash fights the amber expansion. -->
+                            <ListBox.ItemContainerStyle>
+                                <Style TargetType="ListBoxItem">
+                                    <Setter Property="Padding" Value="0" />
+                                    <Setter Property="Margin" Value="0" />
+                                    <Setter Property="BorderThickness" Value="0" />
+                                    <Setter Property="Background" Value="Transparent" />
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                    <Setter Property="Template">
+                                        <Setter.Value>
+                                            <ControlTemplate TargetType="ListBoxItem">
+                                                <Border Background="{TemplateBinding Background}" CornerRadius="4">
+                                                    <ContentPresenter HorizontalAlignment="Stretch" />
+                                                </Border>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                    <Style.Triggers>
+                                        <Trigger Property="IsSelected" Value="True">
+                                            <Setter Property="Background" Value="#EEF3F8" />
+                                        </Trigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </ListBox.ItemContainerStyle>
                             <ListBox.ItemTemplate>
                                 <DataTemplate>
-                                    <StackPanel Margin="0,4">
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="1.4*" />
-                                                <ColumnDefinition Width="90" />
-                                                <ColumnDefinition Width="120" />
-                                                <ColumnDefinition Width="*" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" />
-                                            <TextBlock Grid.Column="1" Text="{Binding Status}" />
-                                            <TextBlock Grid.Column="2" Text="{Binding CurrentIp}" FontFamily="Consolas" />
-                                            <TextBlock Grid.Column="3" Text="{Binding RouteSummary}" Foreground="#5B6875" TextTrimming="CharacterEllipsis" />
-                                        </Grid>
-                                        <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
-                                            <TextBlock Text="found via " Foreground="#8494A3" FontSize="11" />
-                                            <TextBlock Text="{Binding FoundVia}" Foreground="#5B6875" FontSize="11" />
-                                            <TextBlock Text="  •  tailscale " Foreground="#8494A3" FontSize="11"
-                                                       Visibility="{Binding TailscaleAddress, Converter={StaticResource NonEmptyToVisibility}}" />
-                                            <TextBlock Text="{Binding TailscaleAddress}" Foreground="#5B6875" FontSize="11" FontFamily="Consolas"
-                                                       Visibility="{Binding TailscaleAddress, Converter={StaticResource NonEmptyToVisibility}}" />
-                                            <TextBlock Text="  •  " Foreground="#8494A3" FontSize="11"
-                                                       Visibility="{Binding AlsoAt, Converter={StaticResource NonEmptyToVisibility}}" />
-                                            <TextBlock Text="{Binding AlsoAt}" Foreground="#5B6875" FontSize="11" FontFamily="Consolas"
-                                                       Visibility="{Binding AlsoAt, Converter={StaticResource NonEmptyToVisibility}}" />
-                                            <TextBlock Text="  •  " Foreground="#8494A3" FontSize="11"
-                                                       Visibility="{Binding AddressChange, Converter={StaticResource NonEmptyToVisibility}}" />
-                                            <TextBlock Text="{Binding AddressChange}" Foreground="#B25C00" FontSize="11"
-                                                       Visibility="{Binding AddressChange, Converter={StaticResource NonEmptyToVisibility}}" />
+                                    <!-- Amber wash marks the row whose explanation is open. -->
+                                    <Border x:Name="RowRoot" CornerRadius="4" Background="Transparent">
+                                        <StackPanel>
+                                            <Grid Margin="8,9">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="152" />
+                                                    <ColumnDefinition Width="168" />
+                                                    <ColumnDefinition Width="150" />
+                                                    <ColumnDefinition Width="26" />
+                                                </Grid.ColumnDefinitions>
+
+                                                <StackPanel Orientation="Horizontal">
+                                                    <Ellipse x:Name="StatusDot" Width="8" Height="8" Fill="#B25C00" VerticalAlignment="Top" Margin="0,5,9,0" />
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" Foreground="#17212B" TextTrimming="CharacterEllipsis" />
+                                                        <TextBlock Text="{Binding FoundVia}" FontSize="11" Foreground="#5B6875" Margin="0,2,0,0" TextTrimming="CharacterEllipsis" />
+                                                    </StackPanel>
+                                                </StackPanel>
+
+                                                <StackPanel Grid.Column="1">
+                                                    <TextBlock Text="{Binding CurrentIp}" FontFamily="Consolas" FontSize="14" Foreground="#17212B" />
+                                                    <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                                                        <TextBlock x:Name="ConfidenceText" Text="{Binding Confidence}" FontSize="11" FontWeight="SemiBold" Foreground="#B25C00" />
+                                                        <TextBlock Text="{Binding AlsoAt, StringFormat=+ {0}}" FontSize="11" Foreground="#2A6BAF" Margin="7,0,0,0"
+                                                                   TextTrimming="CharacterEllipsis"
+                                                                   ToolTip="{Binding AlsoAt, StringFormat=Also answered at {0}}"
+                                                                   Visibility="{Binding AlsoAt, Converter={StaticResource NonEmptyToVisibility}}" />
+                                                    </StackPanel>
+                                                </StackPanel>
+
+                                                <StackPanel Grid.Column="2">
+                                                    <TextBlock Text="{Binding TailscaleAddress}" FontFamily="Consolas" FontSize="12" Foreground="#5B6875"
+                                                               Visibility="{Binding TailscaleAddress, Converter={StaticResource NonEmptyToVisibility}}" />
+                                                    <TextBlock Text="not on tailnet" FontFamily="Consolas" FontSize="12" Foreground="#5B6875">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock">
+                                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding TailscaleAddress}" Value="">
+                                                                        <Setter Property="Visibility" Value="Visible" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
+                                                    <TextBlock Text="reachable this way" FontSize="11" FontWeight="SemiBold" Foreground="#1B7F53" Margin="0,2,0,0"
+                                                               Visibility="{Binding TailscaleIsTheWayIn, Converter={StaticResource BoolToVisibility}}" />
+                                                    <TextBlock Text="{Binding TailscaleName}" FontSize="11" Foreground="#5B6875" Margin="0,2,0,0" TextTrimming="CharacterEllipsis">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock">
+                                                                <Setter Property="Visibility" Value="Visible" />
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding TailscaleIsTheWayIn}" Value="True">
+                                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
+                                                </StackPanel>
+
+                                                <StackPanel Grid.Column="3">
+                                                    <!-- The pill stays a STATE, so it reads against "Online" in the
+                                                         same column; the cause goes underneath. -->
+                                                    <Border x:Name="StatusPill" Background="#FBEEDE" BorderBrush="#EBD3B4" BorderThickness="1" CornerRadius="10" Padding="10,2" HorizontalAlignment="Left">
+                                                        <TextBlock x:Name="StatusPillText" Text="{Binding Status}" FontSize="11" FontWeight="SemiBold" Foreground="#8A4700" />
+                                                    </Border>
+                                                    <TextBlock Text="{Binding Cause}" FontSize="11" Foreground="#8A4700" Margin="0,3,0,0" TextTrimming="CharacterEllipsis"
+                                                               Visibility="{Binding HasDiagnosis, Converter={StaticResource BoolToVisibility}}" />
+                                                    <TextBlock Text="{Binding AddressChange}" FontSize="11" Foreground="#B25C00" Margin="0,3,0,0" TextTrimming="CharacterEllipsis"
+                                                               ToolTip="{Binding AddressChange}"
+                                                               Visibility="{Binding AddressChange, Converter={StaticResource NonEmptyToVisibility}}" />
+                                                </StackPanel>
+
+                                                <Button Grid.Column="4"
+                                                        x:Name="ExpandButton"
+                                                        Command="{Binding DataContext.ToggleCriticalDeviceExpansionCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                                        CommandParameter="{Binding}"
+                                                        VerticalAlignment="Top"
+                                                        Margin="0,2,0,0"
+                                                        Padding="4"
+                                                        Cursor="Hand"
+                                                        ToolTip="Show why"
+                                                        Visibility="{Binding HasDiagnosis, Converter={StaticResource BoolToVisibility}}">
+                                                    <Button.Template>
+                                                        <ControlTemplate TargetType="Button">
+                                                            <Border Background="Transparent" Padding="{TemplateBinding Padding}">
+                                                                <Path x:Name="Chevron" Data="M 0,0 L 5,5 L 10,0" Stroke="#5B6875" StrokeThickness="2"
+                                                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" />
+                                                            </Border>
+                                                            <ControlTemplate.Triggers>
+                                                                <DataTrigger Binding="{Binding IsExpanded}" Value="True">
+                                                                    <Setter TargetName="Chevron" Property="Data" Value="M 0,5 L 5,0 L 10,5" />
+                                                                </DataTrigger>
+                                                                <Trigger Property="IsMouseOver" Value="True">
+                                                                    <Setter TargetName="Chevron" Property="Stroke" Value="#17212B" />
+                                                                </Trigger>
+                                                            </ControlTemplate.Triggers>
+                                                        </ControlTemplate>
+                                                    </Button.Template>
+                                                </Button>
+                                            </Grid>
+
+                                            <!-- The full explanation, only when asked for. -->
+                                            <Border Background="#FBF7F2" BorderBrush="#EBD3B4" BorderThickness="1" CornerRadius="4"
+                                                    Margin="37,0,8,12" Padding="13,11"
+                                                    Visibility="{Binding IsExpanded, Converter={StaticResource BoolToVisibility}}">
+                                                <StackPanel>
+                                                    <TextBlock Text="{Binding Diagnosis}" FontSize="12" Foreground="#405162" TextWrapping="Wrap" LineHeight="18" />
+                                                    <TextBlock Text="{Binding Remedy}" FontSize="12" Foreground="#405162" TextWrapping="Wrap" LineHeight="18" Margin="0,6,0,0"
+                                                               Visibility="{Binding Remedy, Converter={StaticResource NonEmptyToVisibility}}" />
+                                                    <Border BorderBrush="#EEF2F5" BorderThickness="0,1,0,0" Margin="0,9,0,0" Padding="0,9,0,0">
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <StackPanel Margin="0,0,20,0">
+                                                                <TextBlock Text="Route" FontSize="11" FontWeight="SemiBold" Foreground="#5B6875" />
+                                                                <TextBlock Text="{Binding RouteSummary}" FontFamily="Consolas" FontSize="11" Foreground="#405162" Margin="0,3,0,0" MaxWidth="260" TextTrimming="CharacterEllipsis" />
+                                                            </StackPanel>
+                                                            <StackPanel Margin="0,0,20,0" Visibility="{Binding SshCommand, Converter={StaticResource NonEmptyToVisibility}}">
+                                                                <TextBlock Text="SSH" FontSize="11" FontWeight="SemiBold" Foreground="#5B6875" />
+                                                                <TextBlock Text="{Binding SshCommand}" FontFamily="Consolas" FontSize="11" Foreground="#405162" Margin="0,3,0,0" />
+                                                            </StackPanel>
+                                                            <StackPanel>
+                                                                <TextBlock Text="Last checked" FontSize="11" FontWeight="SemiBold" Foreground="#5B6875" />
+                                                                <TextBlock Text="{Binding LastChecked}" FontSize="11" Foreground="#405162" Margin="0,3,0,0" />
+                                                            </StackPanel>
+                                                        </StackPanel>
+                                                    </Border>
+                                                </StackPanel>
+                                            </Border>
                                         </StackPanel>
-                                        <TextBlock Text="{Binding Diagnosis}"
-                                                   Foreground="#B25C00"
-                                                   FontSize="11"
-                                                   TextWrapping="Wrap"
-                                                   Margin="0,3,0,0"
-                                                   Visibility="{Binding Diagnosis, Converter={StaticResource NonEmptyToVisibility}}" />
-                                    </StackPanel>
+                                    </Border>
+
+                                    <DataTemplate.Triggers>
+                                        <DataTrigger Binding="{Binding IsOnline}" Value="True">
+                                            <Setter TargetName="StatusDot" Property="Fill" Value="#1B7F53" />
+                                            <Setter TargetName="StatusPill" Property="Background" Value="#E3F2EA" />
+                                            <Setter TargetName="StatusPill" Property="BorderBrush" Value="#BFE0CE" />
+                                            <Setter TargetName="StatusPillText" Property="Foreground" Value="#146843" />
+                                            <Setter TargetName="ConfidenceText" Property="Foreground" Value="#1B7F53" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding IsExpanded}" Value="True">
+                                            <Setter TargetName="RowRoot" Property="Background" Value="#FBF7F2" />
+                                        </DataTrigger>
+                                    </DataTemplate.Triggers>
                                 </DataTemplate>
                             </ListBox.ItemTemplate>
                         </ListBox>
