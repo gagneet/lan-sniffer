@@ -323,6 +323,112 @@ public sealed class DeviceLocatorTests
         }
     }
 
+    [Fact]
+    public async Task LocateAsync_PeerContainerBridges_DoNotOutrankTheRealLanAddress()
+    {
+        // ubuntu-svr runs Docker and Kubernetes, so Tailscale advertises its bridge addresses
+        // (10.20.x.1) alongside the real one. Those are RFC1918 and real on the peer, but
+        // unreachable from here, and must not be reported as the server's address.
+        var peer = new TailscaleDevice(
+            "ubuntu-svr",
+            "ubuntu-svr.tail7f7c1e.ts.net",
+            [IPAddress.Parse("100.83.183.74")],
+            IsOnline: true,
+            Endpoints:
+            [
+                new IPEndPoint(IPAddress.Parse("10.20.4.1"), 41641),
+                new IPEndPoint(IPAddress.Parse("10.20.2.1"), 41641)
+            ]);
+
+        var locator = CreateLocator(tailscale: new TailscaleStatus(
+            TailscaleConnectionState.Connected, [peer], [], "my-laptop"));
+
+        var device = HomeServer(ips: ["192.168.0.148"], tailscaleNames: ["ubuntu-svr"]);
+        var location = await locator.LocateAsync(device, NoProbe);
+
+        Assert.Equal("192.168.0.148", location.CurrentAddress?.ToString());
+        Assert.Equal(LocationSource.ConfiguredAddress, location.Source);
+
+        var bridge = location.Candidates.Single(candidate => candidate.Address.ToString() == "10.20.4.1");
+        Assert.Equal(CandidatePlausibility.Unrelated, bridge.Plausibility);
+        Assert.Contains(location.Evidence, line => line.Contains("10.20.4.1") && line.Contains("container bridge"));
+    }
+
+    [Fact]
+    public async Task LocateAsync_AddressOnALocalSubnet_OutranksAnOffSubnetOne()
+    {
+        var peer = new TailscaleDevice(
+            "ubuntu-svr",
+            "ubuntu-svr.tail7f7c1e.ts.net",
+            [IPAddress.Parse("100.83.183.74")],
+            IsOnline: true,
+            Endpoints: [new IPEndPoint(IPAddress.Parse("10.20.4.1"), 41641)]);
+
+        var locator = CreateLocator(
+            tailscale: new TailscaleStatus(TailscaleConnectionState.Connected, [peer], [], "my-laptop"));
+
+        // The fake profile puts this machine on 192.168.0.0/24.
+        var device = HomeServer(ips: ["192.168.0.148"], tailscaleNames: ["ubuntu-svr"]);
+        var location = await locator.LocateAsync(device, NoProbe);
+
+        Assert.Equal(CandidatePlausibility.OnLocalSubnet, location.Candidates[0].Plausibility);
+        Assert.Equal("192.168.0.148", location.Candidates[0].Address.ToString());
+    }
+
+    [Fact]
+    public async Task LocateAsync_ConfiguredSubnetForTheDevice_RanksAboveAnUnrelatedAddress()
+    {
+        var device = new KnownDeviceDefinition
+        {
+            Id = "mac-mini",
+            DisplayName = "Mac Mini",
+            // Wi-Fi side, not on this machine's subnet, but declared for the device.
+            KnownIps = ["192.168.87.118"],
+            KnownSubnets = ["192.168.87.0/24"],
+            KnownTailscaleNames = ["gagneets-mac-mini"]
+        };
+
+        var peer = new TailscaleDevice(
+            "gagneets-mac-mini",
+            "gagneets-mac-mini.tail7f7c1e.ts.net",
+            [IPAddress.Parse("100.64.0.9")],
+            IsOnline: true,
+            Endpoints: [new IPEndPoint(IPAddress.Parse("10.20.9.1"), 41641)]);
+
+        var locator = CreateLocator(tailscale: new TailscaleStatus(
+            TailscaleConnectionState.Connected, [peer], [], "my-laptop"));
+
+        var location = await locator.LocateAsync(device, NoProbe);
+
+        var wifi = location.Candidates.Single(candidate => candidate.Address.ToString() == "192.168.87.118");
+        var bridge = location.Candidates.Single(candidate => candidate.Address.ToString() == "10.20.9.1");
+
+        Assert.Equal(CandidatePlausibility.ConfiguredForDevice, wifi.Plausibility);
+        Assert.Equal(CandidatePlausibility.Unrelated, bridge.Plausibility);
+        Assert.Equal("192.168.87.118", location.CurrentAddress?.ToString());
+    }
+
+    [Fact]
+    public async Task LocateAsync_LeaseMovedWithinAConfiguredSubnet_IsStillPlausible()
+    {
+        var peer = new TailscaleDevice(
+            "ubuntu-svr",
+            "ubuntu-svr.tail7f7c1e.ts.net",
+            [IPAddress.Parse("100.83.183.74")],
+            IsOnline: true,
+            CurrentAddress: new IPEndPoint(IPAddress.Parse("172.30.5.9"), 41641));
+
+        var locator = CreateLocator(tailscale: new TailscaleStatus(
+            TailscaleConnectionState.Connected, [peer], [], "my-laptop"));
+
+        // 172.30.5.9 shares a /24 with the configured 172.30.5.40, so it reads as the same subnet.
+        var device = HomeServer(ips: ["172.30.5.40"], tailscaleNames: ["ubuntu-svr"]);
+        var location = await locator.LocateAsync(device, NoProbe);
+
+        var moved = location.Candidates.Single(candidate => candidate.Address.ToString() == "172.30.5.9");
+        Assert.Equal(CandidatePlausibility.ConfiguredForDevice, moved.Plausibility);
+    }
+
     private sealed class FakeArpTableReader(IReadOnlyList<ArpTableEntry> entries) : IArpTableReader
     {
         public int ReadCallCount { get; private set; }

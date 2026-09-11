@@ -164,6 +164,10 @@
                                             <TextBlock Text="{Binding TailscaleAddress}" Foreground="#5B6875" FontSize="11" FontFamily="Consolas"
                                                        Visibility="{Binding TailscaleAddress, Converter={StaticResource NonEmptyToVisibility}}" />
                                             <TextBlock Text="  •  " Foreground="#8494A3" FontSize="11"
+                                                       Visibility="{Binding AlsoAt, Converter={StaticResource NonEmptyToVisibility}}" />
+                                            <TextBlock Text="{Binding AlsoAt}" Foreground="#5B6875" FontSize="11" FontFamily="Consolas"
+                                                       Visibility="{Binding AlsoAt, Converter={StaticResource NonEmptyToVisibility}}" />
+                                            <TextBlock Text="  •  " Foreground="#8494A3" FontSize="11"
                                                        Visibility="{Binding AddressChange, Converter={StaticResource NonEmptyToVisibility}}" />
                                             <TextBlock Text="{Binding AddressChange}" Foreground="#B25C00" FontSize="11"
                                                        Visibility="{Binding AddressChange, Converter={StaticResource NonEmptyToVisibility}}" />

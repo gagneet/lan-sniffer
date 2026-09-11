@@ -166,7 +166,7 @@ Create `known-devices.json` in the current directory, `~/.config/laninspector/`,
 | `knownHostnames` | Used for DNS and mDNS (`<name>.local`) lookups when the device is on another segment and its MAC is not in the local ARP cache. |
 | `knownTailscaleNames` | Matches the tailnet peer, which supplies both the stable overlay address and live LAN endpoint evidence. |
 | `knownIps` | Starting points only — treated as the weakest evidence, because they go stale. |
-| `knownSubnets` | For routers known by the range they serve rather than a fixed address. |
+| `knownSubnets` | For routers known by the range they serve rather than a fixed address, and for telling the locator which off-subnet addresses are legitimate for a device rather than noise from a peer's container bridges. |
 
 Files are **merged by device id, with later files winning**, in this order:
 
@@ -310,7 +310,7 @@ Targets: `win-x64`, `linux-x64`, `osx-x64`, `osx-arm64`. Artifacts written to `a
 - RFC1918 / CGNAT route misconfiguration detection (e.g. Eero routing 192.168.87.x upstream via 100.64.x.x).
 - **Topology snapshot** with node/edge model, confidence levels (Confirmed/High/Medium/Low/Unknown), evidence tracking, and Mermaid diagram export.
 - **Visibility explanation engine** — explains in plain English whether a machine can reach a target IP and why.
-- **Device locator** — resolves a known device's current LAN IP from the ARP cache (by MAC), Tailscale peer endpoints, `tailscale ping`, DNS/mDNS, remembered and configured addresses; verifies by TCP probe and records address changes over time.
+- **Device locator** — resolves a known device's current LAN IP from the ARP cache (by MAC), Tailscale peer endpoints, `tailscale ping`, DNS/mDNS, remembered and configured addresses; verifies by TCP probe with an ICMP fallback, ranks candidates by whether this machine could plausibly reach them (so a peer's Docker bridges do not masquerade as its LAN address), reports every address a multi-homed device answers on, and records address changes over time.
 - **Traffic flow aggregation** — live packets/sec, bytes/sec, per-flow tracking, per-host top-talker ranking, and a throughput chart covering up to three hours with per-host drill-down.
 - **Passive LLDP analyzer** — captures EtherType 0x88CC frames and extracts chassis ID, port ID, system name, management address.
 - **Nmap integration** — optional ping sweep, TCP connect scan, service detection. Parses XML output.

@@ -48,6 +48,28 @@ public enum LocationConfidence
     None
 }
 
+/// <summary>
+/// How plausible it is that this machine could reach a candidate address at all, judged before
+/// any packet is sent.
+/// </summary>
+/// <remarks>
+/// This exists because Tailscale advertises every address a peer has, including its container
+/// bridges. A server running Docker and Kubernetes offers up addresses like <c>10.20.4.1</c>
+/// that are real on the peer and meaningless here; without this tier they would outrank the
+/// peer's actual LAN address purely because endpoint evidence sits higher than configuration.
+/// </remarks>
+public enum CandidatePlausibility
+{
+    /// <summary>Inside one of this machine's own interface subnets — directly reachable.</summary>
+    OnLocalSubnet = 0,
+
+    /// <summary>Inside a subnet or address this device is configured to use — plausibly routed.</summary>
+    ConfiguredForDevice = 1,
+
+    /// <summary>On no subnet either machine is known to use — most likely a bridge on the peer.</summary>
+    Unrelated = 2
+}
+
 public sealed record DeviceLocationCandidate(
     IPAddress Address,
     LocationSource Source,
@@ -58,6 +80,15 @@ public sealed record DeviceLocationCandidate(
 
     /// <summary>The TCP port that verified this candidate, when one did.</summary>
     public int? VerifiedPort { get; init; }
+
+    /// <summary>
+    /// True when nothing accepted a TCP connection but the host answered an ICMP echo. It proves
+    /// the address is live without proving any service is up — enough for a device with no open
+    /// ports, such as a Mac with Remote Login switched off.
+    /// </summary>
+    public bool VerifiedByIcmp { get; init; }
+
+    public CandidatePlausibility Plausibility { get; init; } = CandidatePlausibility.Unrelated;
 }
 
 public sealed record DeviceLocation(
@@ -73,6 +104,20 @@ public sealed record DeviceLocation(
     public IPAddress? TailscaleAddress { get; init; }
 
     public string? TailscaleName { get; init; }
+
+    /// <summary>
+    /// Every address that answered a probe, strongest evidence first, so
+    /// <see cref="CurrentAddress"/> is the head of this list. A machine with a wired and a
+    /// wireless interface on different subnets — common where a LAN switch and a mesh router
+    /// both serve the same room — genuinely has more than one current address, and reporting
+    /// only one hides the half the caller may actually be able to reach.
+    /// </summary>
+    public IReadOnlyList<IPAddress> VerifiedAddresses { get; init; } = [];
+
+    public bool IsMultiHomed => VerifiedAddresses.Count > 1;
+
+    /// <summary>Verified addresses other than the primary one.</summary>
+    public IEnumerable<IPAddress> AdditionalAddresses => VerifiedAddresses.Skip(1);
 
     /// <summary>The address recorded by the previous locate, when it differs from the current one.</summary>
     public IPAddress? PreviousAddress { get; init; }
@@ -98,7 +143,10 @@ public sealed record DeviceLocation(
 
             var via = Source is null ? string.Empty : $" ({Describe(Source.Value)})";
             var moved = HasMoved ? $" — changed from {PreviousAddress}" : string.Empty;
-            return $"{DisplayName} is at {CurrentAddress}{via}, confidence {Confidence}{moved}.";
+            var alsoAt = IsMultiHomed
+                ? $" Also reachable at {string.Join(", ", AdditionalAddresses)}."
+                : string.Empty;
+            return $"{DisplayName} is at {CurrentAddress}{via}, confidence {Confidence}{moved}.{alsoAt}";
         }
     }
 

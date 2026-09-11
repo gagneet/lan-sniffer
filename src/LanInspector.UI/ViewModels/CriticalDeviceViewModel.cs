@@ -52,6 +52,10 @@ public sealed partial class CriticalDeviceViewModel : ObservableObject
     [ObservableProperty]
     private string _addressChange = string.Empty;
 
+    /// <summary>Other addresses this device answered on, for a machine with more than one interface.</summary>
+    [ObservableProperty]
+    private string _alsoAt = string.Empty;
+
     public bool HasSsh => Definition.Ssh?.Enabled == true && !string.IsNullOrWhiteSpace(SshCommand);
 
     public void Update(string status, string currentIp, string routeSummary)
@@ -79,6 +83,7 @@ public sealed partial class CriticalDeviceViewModel : ObservableObject
             ? "not located"
             : $"{DeviceLocation.Describe(location.Source.Value)} ({location.Confidence})";
         TailscaleAddress = location.TailscaleAddress?.ToString() ?? string.Empty;
+        AlsoAt = location.IsMultiHomed ? $"also at {string.Join(", ", location.AdditionalAddresses)}" : string.Empty;
         AddressChange = location.HasMoved
             ? $"was {location.PreviousAddress}" + (location.AddressChangedAt is null ? "" : $" until {location.AddressChangedAt.Value.ToLocalTime():HH:mm:ss}")
             : string.Empty;

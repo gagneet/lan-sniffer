@@ -18,6 +18,18 @@ public sealed record DeviceLocatorOptions
 
     public TimeSpan ProbeTimeout { get; init; } = TimeSpan.FromMilliseconds(750);
 
+    /// <summary>
+    /// Ceiling on how many candidates are dialled. Candidates are probed in parallel and a device
+    /// rarely has more than a handful, but a long history plus a busy tailnet could produce more.
+    /// </summary>
+    public int MaxCandidatesToProbe { get; init; } = 8;
+
+    /// <summary>
+    /// Fall back to an ICMP echo when no TCP port answers. Without it, a device that is present
+    /// but has every probed port closed reports as unconfirmed.
+    /// </summary>
+    public bool VerifyWithIcmpFallback { get; init; } = true;
+
     /// <summary>Ports tried when a device has no SSH profile configured.</summary>
     public IReadOnlyList<int> FallbackProbePorts { get; init; } = [22, 80, 443];
 

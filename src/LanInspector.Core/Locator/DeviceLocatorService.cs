@@ -1,4 +1,6 @@
 using System.Net;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using LanInspector.Core.Configuration;
 using LanInspector.Core.Diagnostics;
 using LanInspector.Core.Identity;
@@ -114,18 +116,32 @@ public sealed class DeviceLocatorService : IDeviceLocatorService
         AddRememberedCandidate(device, options, candidates, evidence);
         AddConfiguredCandidates(device, candidates, evidence);
 
+        // Plausibility outranks evidence strength. A Tailscale endpoint list is strong evidence
+        // about the peer but says nothing about what this machine can reach, and on a host running
+        // Docker or Kubernetes it is mostly container bridges.
         var ordered = candidates.Values
-            .OrderBy(candidate => candidate.Source)
-            .ThenByDescending(candidate => context.Profile.FindLocalInterface(candidate.Address) is not null)
+            .Select(candidate => candidate with { Plausibility = RatePlausibility(candidate.Address, context, device) })
+            .OrderBy(candidate => candidate.Plausibility)
+            .ThenBy(candidate => candidate.Source)
             .ToList();
+
+        foreach (var unrelated in ordered.Where(candidate => candidate.Plausibility == CandidatePlausibility.Unrelated))
+        {
+            evidence.Add($"{unrelated.Address} is on no subnet this machine or {device.Id} is known to use — treated as a low-priority guess (a container bridge on the peer would look like this).");
+        }
 
         var probePorts = GetProbePorts(device, options);
         var probed = options.VerifyWithTcpProbe
             ? await ProbeAsync(ordered, probePorts, options, evidence, cancellationToken)
             : ordered;
 
-        var winner = probed.FirstOrDefault(candidate => candidate.IsVerified == true)
-            ?? probed.FirstOrDefault();
+        var verified = probed.Where(candidate => candidate.IsVerified == true).ToArray();
+        var winner = verified.FirstOrDefault() ?? probed.FirstOrDefault();
+
+        if (verified.Length > 1)
+        {
+            evidence.Add($"This device answers on {verified.Length} addresses ({string.Join(", ", verified.Select(candidate => candidate.Address))}); it has more than one active interface.");
+        }
 
         var confidence = DetermineConfidence(winner);
         var tailscaleAddress = peer?.TailscaleIps.FirstOrDefault(RouteHelpers.IsCgnatOrTailscale)
@@ -162,6 +178,7 @@ public sealed class DeviceLocatorService : IDeviceLocatorService
         {
             TailscaleAddress = tailscaleAddress,
             TailscaleName = peer?.DnsName is { Length: > 0 } dnsName ? dnsName : peer?.Name,
+            VerifiedAddresses = [.. verified.Select(candidate => candidate.Address)],
             PreviousAddress = previousAddress,
             // Only meaningful alongside a previous address; on a first sighting the store still
             // stamps a time, but reporting it would imply a move that never happened.
@@ -377,6 +394,44 @@ public sealed class DeviceLocatorService : IDeviceLocatorService
         }
     }
 
+    private static CandidatePlausibility RatePlausibility(
+        IPAddress address,
+        LocatorContext context,
+        KnownDeviceDefinition device)
+    {
+        if (context.Profile.FindLocalInterface(address) is not null)
+        {
+            return CandidatePlausibility.OnLocalSubnet;
+        }
+
+        if (device.KnownIps.Any(ip => string.Equals(ip, address.ToString(), StringComparison.OrdinalIgnoreCase)))
+        {
+            return CandidatePlausibility.ConfiguredForDevice;
+        }
+
+        foreach (var subnet in device.KnownSubnets)
+        {
+            if (IPv4Network.TryParse(subnet, out var network) && network!.Contains(address))
+            {
+                return CandidatePlausibility.ConfiguredForDevice;
+            }
+        }
+
+        // A /24 around a configured address counts too, so that a device whose lease moved within
+        // its own subnet is not demoted just because the exact address changed.
+        foreach (var configured in device.KnownIps)
+        {
+            if (IPAddress.TryParse(configured, out var parsed)
+                && parsed.AddressFamily == AddressFamily.InterNetwork
+                && IPv4Network.FromAddressAndPrefix(parsed, 24).Contains(address))
+            {
+                return CandidatePlausibility.ConfiguredForDevice;
+            }
+        }
+
+        return CandidatePlausibility.Unrelated;
+    }
+
     private static IReadOnlyList<int> GetProbePorts(KnownDeviceDefinition device, DeviceLocatorOptions options)
     {
         return device.Ssh?.Enabled == true && device.Ssh.Port > 0
@@ -384,6 +439,13 @@ public sealed class DeviceLocatorService : IDeviceLocatorService
             : options.FallbackProbePorts;
     }
 
+    /// <summary>
+    /// Dials every candidate rather than stopping at the first that answers. A dual-homed machine
+    /// — wired on one subnet, wireless on another — answers on both, and stopping early would
+    /// report one address while leaving the other marked "not probed", which is exactly backwards
+    /// for the caller deciding which one their own machine can reach. Candidates are probed
+    /// concurrently, so the extra coverage costs roughly one probe timeout, not one per address.
+    /// </summary>
     private async Task<IReadOnlyList<DeviceLocationCandidate>> ProbeAsync(
         IReadOnlyList<DeviceLocationCandidate> candidates,
         IReadOnlyList<int> ports,
@@ -391,24 +453,16 @@ public sealed class DeviceLocatorService : IDeviceLocatorService
         List<string> evidence,
         CancellationToken cancellationToken)
     {
-        var probed = new List<DeviceLocationCandidate>(candidates.Count);
-        var alreadyVerified = false;
+        var toProbe = candidates.Take(options.MaxCandidatesToProbe).ToArray();
+        var notProbed = candidates.Skip(options.MaxCandidatesToProbe).ToArray();
 
-        foreach (var candidate in candidates)
+        var probed = await Task.WhenAll(toProbe.Select(async candidate =>
         {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            // Once a candidate is confirmed, the rest are still reported but not dialled: the
-            // remaining addresses are lower-ranked and probing them only costs time.
-            if (alreadyVerified)
-            {
-                probed.Add(candidate);
-                continue;
-            }
-
             int? openPort = null;
             foreach (var port in ports)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 var result = await _portScanner.ScanPortAsync(candidate.Address, port, options.ProbeTimeout, cancellationToken);
                 if (result.IsOpen)
                 {
@@ -417,21 +471,40 @@ public sealed class DeviceLocatorService : IDeviceLocatorService
                 }
             }
 
-            probed.Add(candidate with { IsVerified = openPort is not null, VerifiedPort = openPort });
-
             if (openPort is not null)
             {
-                alreadyVerified = true;
-                evidence.Add($"TCP port {openPort} accepted a connection at {candidate.Address}.");
+                return candidate with { IsVerified = true, VerifiedPort = openPort };
             }
+
+            // No port answered. A device can still be present with every port closed — a Mac with
+            // Remote Login off, a printer, an appliance — so fall back to ICMP before writing the
+            // address off.
+            var answeredPing = options.VerifyWithIcmpFallback
+                && await TryPingAsync(candidate.Address, options.ProbeTimeout, cancellationToken);
+
+            return candidate with { IsVerified = answeredPing, VerifiedByIcmp = answeredPing };
+        }));
+
+        // Evidence is added after the parallel probes so its order follows candidate rank rather
+        // than whichever probe happened to finish first.
+        foreach (var candidate in probed.Where(candidate => candidate.IsVerified == true))
+        {
+            evidence.Add(candidate.VerifiedByIcmp
+                ? $"{candidate.Address} answered an ICMP echo, but no probed TCP port was open."
+                : $"TCP port {candidate.VerifiedPort} accepted a connection at {candidate.Address}.");
         }
 
-        if (!alreadyVerified && candidates.Count > 0)
+        if (candidates.Count > 0 && !probed.Any(candidate => candidate.IsVerified == true))
         {
             evidence.Add($"No candidate accepted a connection on port(s) {string.Join(", ", ports)}; the reported address is unconfirmed.");
         }
 
-        return probed;
+        if (notProbed.Length > 0)
+        {
+            evidence.Add($"{notProbed.Length} lower-ranked candidate(s) were not probed (limit {options.MaxCandidatesToProbe}).");
+        }
+
+        return [.. probed, .. notProbed];
     }
 
     private static LocationConfidence DetermineConfidence(DeviceLocationCandidate? winner)
@@ -443,7 +516,9 @@ public sealed class DeviceLocatorService : IDeviceLocatorService
 
         if (winner.IsVerified == true)
         {
-            return LocationConfidence.Confirmed;
+            // An open TCP port proves a service answered there; an echo reply only proves the
+            // address is live, which is one step weaker.
+            return winner.VerifiedByIcmp ? LocationConfidence.High : LocationConfidence.Confirmed;
         }
 
         return winner.Source switch
@@ -455,6 +530,22 @@ public sealed class DeviceLocatorService : IDeviceLocatorService
             LocationSource.HostnameLookup => LocationConfidence.Medium,
             _ => LocationConfidence.Low
         };
+    }
+
+    private static async Task<bool> TryPingAsync(IPAddress address, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var ping = new Ping();
+            var reply = await ping.SendPingAsync(address, timeout, cancellationToken: cancellationToken);
+            return reply.Status == IPStatus.Success;
+        }
+        catch (Exception ex) when (ex is PingException or SocketException or OperationCanceledException)
+        {
+            // ICMP is frequently blocked outright, and unprivileged ICMP is unavailable on some
+            // platforms. Either way this is a failed probe, not an error worth surfacing.
+            return false;
+        }
     }
 
     private async Task<IReadOnlyList<ArpTableEntry>> SafeReadArpAsync(CancellationToken cancellationToken)

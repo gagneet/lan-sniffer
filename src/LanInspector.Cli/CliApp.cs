@@ -275,6 +275,8 @@ internal static class CliApp
                 confidence = location.Confidence.ToString(),
                 tailscaleAddress = location.TailscaleAddress?.ToString(),
                 tailscaleName = location.TailscaleName,
+                verifiedAddresses = location.VerifiedAddresses.Select(address => address.ToString()),
+                isMultiHomed = location.IsMultiHomed,
                 previousAddress = location.PreviousAddress?.ToString(),
                 addressChangedAt = location.AddressChangedAt,
                 hasMoved = location.HasMoved,
@@ -284,7 +286,9 @@ internal static class CliApp
                     source = candidate.Source.ToString(),
                     detail = candidate.Detail,
                     isVerified = candidate.IsVerified,
-                    verifiedPort = candidate.VerifiedPort
+                    verifiedPort = candidate.VerifiedPort,
+                    verifiedByIcmp = candidate.VerifiedByIcmp,
+                    plausibility = candidate.Plausibility.ToString()
                 }),
                 evidence = location.Evidence
             }), new JsonSerializerOptions { WriteIndented = true }));
@@ -306,6 +310,11 @@ internal static class CliApp
             Console.WriteLine($"  Found via      : {(location.Source is null ? "-" : DeviceLocation.Describe(location.Source.Value))}");
             Console.WriteLine($"  Confidence     : {location.Confidence}");
 
+            if (location.IsMultiHomed)
+            {
+                Console.WriteLine($"  Also at        : {string.Join(", ", location.AdditionalAddresses)}  (more than one active interface)");
+            }
+
             if (location.TailscaleAddress is not null)
             {
                 Console.WriteLine($"  Tailscale      : {location.TailscaleAddress}" +
@@ -323,13 +332,15 @@ internal static class CliApp
                 Console.WriteLine("  Candidates:");
                 foreach (var candidate in location.Candidates)
                 {
-                    var mark = candidate.IsVerified switch
+                    var mark = candidate switch
                     {
-                        true => $"[open :{candidate.VerifiedPort}]",
-                        false => "[no answer]",
+                        { IsVerified: true, VerifiedByIcmp: true } => "[ping only]",
+                        { IsVerified: true } => $"[open :{candidate.VerifiedPort}]",
+                        { IsVerified: false } => "[no answer]",
                         _ => "[not probed]"
                     };
-                    Console.WriteLine($"    {candidate.Address,-16} {mark,-14} {candidate.Detail}");
+                    var rank = candidate.Plausibility == CandidatePlausibility.Unrelated ? " (unrelated subnet)" : string.Empty;
+                    Console.WriteLine($"    {candidate.Address,-16} {mark,-14} {candidate.Detail}{rank}");
                 }
             }
 

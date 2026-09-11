@@ -11,17 +11,36 @@ unreachable when it was in fact fine.
 ```text
 NBN / Internet
   └── Eero router            192.168.87.1  or  192.168.4.1   (changes across reboots)
+        │                                                     serves 192.168.87.0/24
+        │     └── gagneets-mac-mini  en1 (Wi-Fi)  192.168.87.118
         └── FAST5366LTE-A    192.168.0.1                     (Optus modem-router, DHCP server)
               └── 6-port unmanaged LAN switch
-                    └── ubuntu-svr        192.168.0.x         (currently .154, was .148)
+                    ├── ubuntu-svr          enp2s0  192.168.0.148   68:1d:ef:3c:d5:45
+                    └── gagneets-mac-mini   en0     192.168.0.154   1c:f6:4c:51:76:d3
 ```
+
+The Mac Mini is **dual-homed**: wired into the switch on `192.168.0.0/24` *and* on Wi-Fi to the
+Eero on `192.168.87.0/24`. It is the one machine sitting on both sides of the boundary that makes
+SSH fail from the Eero side, which makes it the natural place to run a Tailscale subnet router.
+
+`ubuntu-svr` also reports a set of `10.20.x.1` addresses (`docker0`, `docker_gwbridge`, four
+`br-*` bridges) and a pile of `veth*` and `cali*` interfaces. Those are Docker and Kubernetes
+container networks. They are real on the server and completely unreachable from any other
+machine — see [Container addresses](#container-addresses-on-ubuntu-svr) below for why that matters
+to the locator.
 
 Two separate things move here, and it helps to keep them apart:
 
 | What moves | Why | What fixes it |
 |---|---|---|
-| `ubuntu-svr`'s address inside `192.168.0.0/24` | The FAST5366LTE-A hands out a new lease after a power cycle | A DHCP reservation on the FAST5366LTE-A, keyed to the server's MAC |
+| `ubuntu-svr`'s address inside `192.168.0.0/24` | The FAST5366LTE-A hands out a new lease after a power cycle | A DHCP reservation on the FAST5366LTE-A, keyed to `68:1d:ef:3c:d5:45` |
+| The Mac Mini's `en0` address | Same DHCP server, same cause | A reservation keyed to `1c:f6:4c:51:76:d3` |
+| The Mac Mini's `en1` address | The Eero's DHCP, plus macOS private Wi-Fi addressing | Turn off "Private Wi-Fi Address" for that network if you want a stable reservation — otherwise track it by hostname |
 | The Eero's own address (`192.168.87.1` ↔ `192.168.4.1`) | The Eero picks a different private range depending on what it sees upstream at boot | Pin the Eero's LAN subnet in its app, or leave it and let the locator track it |
+
+Note the Mac Mini's `en1` MAC (`86:61:7a:c6:1f:7f`) has the locally-administered bit set — it is a
+randomised Wi-Fi address, not the hardware one. Only `en0`'s MAC is worth putting in
+`knownMacs`; a randomised address will change and silently stop matching.
 
 The unmanaged switch is invisible to all of this — it does not assign addresses and cannot be
 queried. Everything below works at the layer above it.
@@ -137,6 +156,15 @@ and what copes with the Eero side, where you do not control the DHCP server.
 sudo tailscale up --advertise-routes=192.168.0.0/24
 ```
 
+The Mac Mini is the better subnet router if you want *both* sides reachable, because it is the only
+machine on both — but only if it is on Tailscale. The `ifconfig` output above shows no `utun`
+interface carrying a `100.x` address, so Tailscale does not appear to be running on it yet:
+
+```bash
+# on gagneets-mac-mini, once Tailscale is installed
+sudo tailscale up --advertise-routes=192.168.0.0/24,192.168.87.0/24
+```
+
 Then approve the route in the Tailscale admin console. `laninspector tailscale routes` prints the
 command for each device tagged `server`.
 
@@ -147,6 +175,63 @@ no route to the subnet behind the FAST5366LTE-A. A packet for `192.168.0.154` se
 side does not reach the modem's LAN — it goes upstream, usually into CGNAT (`100.64.0.0/10`), where
 it dies. Nothing on the server can fix that; the route has to exist on the Eero, or the traffic has
 to bypass it via Tailscale. That is what step 3 above is for.
+
+## Container addresses on `ubuntu-svr`
+
+Tailscale advertises *every* address a peer has as a candidate endpoint. On a host running Docker
+and Kubernetes that includes the container bridges:
+
+```text
+docker0          10.20.0.1
+docker_gwbridge  10.20.1.1
+br-60fc61f72810  10.20.2.1
+br-88c29693c4a9  10.20.3.1
+br-be4c02214168  10.20.4.1
+br-790344c95f0e  10.20.5.1
+```
+
+These are RFC1918 addresses and look exactly like LAN addresses to a naive filter — but they exist
+only inside the server. Reporting `10.20.4.1` as "the server's current IP" would be worse than
+useless.
+
+The locator ranks every candidate by plausibility *before* it ranks by evidence strength:
+
+| Tier | Meaning |
+|---|---|
+| `OnLocalSubnet` | Inside one of this machine's own interface subnets — directly reachable |
+| `ConfiguredForDevice` | Inside a subnet or `/24` this device is configured for — plausibly routed |
+| `Unrelated` | On no subnet either machine is known to use — almost certainly a bridge on the peer |
+
+A container bridge lands in `Unrelated` and is demoted below even a stale configured address, and
+the evidence line says why. The TCP probe then settles it regardless: `10.20.4.1` will not answer
+from here, and an address that does answer wins outright.
+
+This is also why `knownSubnets` is worth filling in. It is what tells the locator that
+`192.168.87.118` is a legitimate second address for the Mac Mini rather than noise.
+
+## Devices with more than one interface
+
+`laninspector locate` probes every candidate rather than stopping at the first that answers,
+because a dual-homed machine genuinely has more than one current address:
+
+```text
+Mac Mini (gagneets-mac-mini) (mac-mini)
+  Current LAN IP : 192.168.0.154
+  Found via      : ARP cache, matched by MAC
+  Confidence     : Confirmed
+  Also at        : 192.168.87.118  (more than one active interface)
+```
+
+Which one you use depends on where *you* are. From the `192.168.0.x` side, `.154` is a direct
+layer-2 hop; from the Eero side, `192.168.87.118` is, and `.154` is unreachable.
+
+## Devices with no open ports
+
+A Mac with Remote Login switched off has no port to connect to, so a TCP-only probe would report
+it as unconfirmed even while it sits there answering pings. When no probed port responds, the
+locator falls back to an ICMP echo; a device verified that way is reported at `High` confidence
+rather than `Confirmed`, and the candidate is marked `[ping only]` — present, but no service
+proven.
 
 ## Keeping a log of the moves
 
