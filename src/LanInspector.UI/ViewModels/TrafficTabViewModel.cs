@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using LanInspector.Core.Identity;
 using LanInspector.Core.Traffic;
 
 namespace LanInspector.UI.ViewModels;
@@ -9,7 +10,9 @@ namespace LanInspector.UI.ViewModels;
 public sealed class TrafficFlowViewModel
 {
     public string Source { get; init; } = "";
+    public string SourceName { get; init; } = "";
     public string Destination { get; init; } = "";
+    public string DestinationName { get; init; } = "";
     public string Protocol { get; init; } = "";
     public long Packets { get; init; }
     public string Bytes { get; init; } = "";
@@ -19,6 +22,12 @@ public sealed class TrafficFlowViewModel
 public sealed class TrafficTalkerViewModel
 {
     public string Address { get; init; } = "";
+
+    /// <summary>Friendly name when one is known; empty otherwise, so the row falls back to the address.</summary>
+    public string Name { get; init; } = "";
+
+    public bool HasName => !string.IsNullOrWhiteSpace(Name);
+
     public string Sent { get; init; } = "";
     public string Received { get; init; } = "";
     public string Total { get; init; } = "";
@@ -30,8 +39,12 @@ public sealed class TrafficTalkerViewModel
 public sealed class TrafficPeerViewModel
 {
     public string Address { get; init; } = "";
+    public string Name { get; init; } = "";
     public string Bytes { get; init; } = "";
     public long Packets { get; init; }
+
+    /// <summary>Name when known, otherwise the bare address — the peer list is too narrow for both.</summary>
+    public string Display => string.IsNullOrWhiteSpace(Name) ? Address : Name;
 }
 
 public sealed class TrafficChartBar
@@ -57,6 +70,7 @@ public sealed partial class TrafficTabViewModel : ObservableObject, IDisposable
     private const double ChartWidth = 560;
 
     private readonly ITrafficFlowService _trafficService;
+    private readonly IDeviceNameResolver? _nameResolver;
     private readonly DispatcherTimer _refreshTimer;
 
     /// <summary>
@@ -119,9 +133,10 @@ public sealed partial class TrafficTabViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private TrafficWindowOption _selectedWindow;
 
-    public TrafficTabViewModel(ITrafficFlowService trafficService)
+    public TrafficTabViewModel(ITrafficFlowService trafficService, IDeviceNameResolver? nameResolver = null)
     {
         _trafficService = trafficService;
+        _nameResolver = nameResolver;
         _selectedWindow = WindowOptions.First(option => option.Window == TrafficWindow.LastHour);
 
         _refreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
@@ -181,7 +196,7 @@ public sealed partial class TrafficTabViewModel : ObservableObject, IDisposable
 
         ChartTitle = detail is null
             ? $"Throughput — {window.GetLabel()}"
-            : $"Throughput — {detail.Talker.Address} — {window.GetLabel()}";
+            : $"Throughput — {Describe(detail.Talker.Address)} — {window.GetLabel()}";
         ChartScaleText = peakBytesPerSecond > 0 ? $"peak {FormatBytes(peakBytesPerSecond)}/s" : "no traffic in window";
 
         RenderChart(series, peakBytesPerSecond, window);
@@ -200,6 +215,7 @@ public sealed partial class TrafficTabViewModel : ObservableObject, IDisposable
             TopTalkers.Add(new TrafficTalkerViewModel
             {
                 Address = talker.Address,
+                Name = ResolveName(talker.Address),
                 Sent = FormatBytes(talker.BytesSent),
                 Received = FormatBytes(talker.BytesReceived),
                 Total = FormatBytes(talker.TotalBytes),
@@ -246,7 +262,7 @@ public sealed partial class TrafficTabViewModel : ObservableObject, IDisposable
     private void RefreshFlows(TrafficTalkerDetail? detail, TrafficSummary summary)
     {
         var flows = detail?.TopFlows ?? summary.TopFlows;
-        FlowsTitle = detail is null ? "Top flows" : $"Flows involving {detail.Talker.Address}";
+        FlowsTitle = detail is null ? "Top flows" : $"Flows involving {Describe(detail.Talker.Address)}";
 
         TopFlows.Clear();
         foreach (var flow in flows)
@@ -254,7 +270,9 @@ public sealed partial class TrafficTabViewModel : ObservableObject, IDisposable
             TopFlows.Add(new TrafficFlowViewModel
             {
                 Source = $"{flow.Key.SourceIp}:{flow.Key.SourcePort}",
+                SourceName = ResolveName(flow.Key.SourceIp.ToString()),
                 Destination = $"{flow.Key.DestIp}:{flow.Key.DestPort}",
+                DestinationName = ResolveName(flow.Key.DestIp.ToString()),
                 Protocol = flow.Key.Protocol,
                 Packets = flow.Packets,
                 Bytes = FormatBytes(flow.Bytes),
@@ -274,7 +292,10 @@ public sealed partial class TrafficTabViewModel : ObservableObject, IDisposable
             return;
         }
 
-        DetailTitle = detail.Talker.Address;
+        var detailName = ResolveName(detail.Talker.Address);
+        DetailTitle = string.IsNullOrWhiteSpace(detailName)
+            ? detail.Talker.Address
+            : $"{detailName}  ({detail.Talker.Address})";
         var protocols = detail.Protocols.Count == 0
             ? "none"
             : string.Join(", ", detail.Protocols.Take(4).Select(share => $"{share.Protocol} {FormatBytes(share.Bytes)}"));
@@ -287,6 +308,7 @@ public sealed partial class TrafficTabViewModel : ObservableObject, IDisposable
             SelectedTalkerPeers.Add(new TrafficPeerViewModel
             {
                 Address = peer.Address,
+                Name = ResolveName(peer.Address),
                 Bytes = FormatBytes(peer.Bytes),
                 Packets = peer.Packets
             });
@@ -304,6 +326,26 @@ public sealed partial class TrafficTabViewModel : ObservableObject, IDisposable
         _trafficService.Reset();
         SelectedTalker = null;
         Refresh();
+    }
+
+    private string ResolveName(string address)
+    {
+        try
+        {
+            return _nameResolver?.Resolve(address) ?? string.Empty;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // A name is a convenience; failing to find one must never take down the traffic view.
+            System.Diagnostics.Debug.WriteLine($"Name lookup failed for {address}: {ex}");
+            return string.Empty;
+        }
+    }
+
+    private string Describe(string address)
+    {
+        var name = ResolveName(address);
+        return string.IsNullOrWhiteSpace(name) ? address : $"{name} ({address})";
     }
 
     private static string FormatBytes(double bytes)

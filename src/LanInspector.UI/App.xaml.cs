@@ -28,10 +28,11 @@ public partial class App : Application
 
         var devices = new ConcurrentDictionary<string, Device>();
         _captureProvider = new PcapCaptureProvider();
+        var dnsAnalyzer = new DnsAnalyzer(devices);
         var analyzers = new IDeviceObservingAnalyzer[]
         {
             new ArpAnalyzer(devices),
-            new DnsAnalyzer(devices),
+            dnsAnalyzer,
             new DhcpAnalyzer(devices)
         };
 
@@ -65,6 +66,28 @@ public partial class App : Application
         var dnsConfig = DnsIntegrationsConfigLoader.Load();
         var dnsService = DnsIntegrationsConfigLoader.CreateService(dnsConfig);
 
+        // Names for the traffic view: configured devices, devices seen in the capture, this
+        // machine's interfaces, and hostnames learned from DNS/mDNS answers.
+        var nameRegistry = new DeviceNameRegistry(
+            knownDevices.KnownDevices,
+            () => devices.Values,
+            localNetworkProvider);
+        nameRegistry.Observe(dnsAnalyzer);
+
+        // The tailnet peer list labels 100.x addresses; fetched once in the background so startup
+        // is not held up by a CLI call that may not be installed.
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                nameRegistry.SetTailscaleStatus(await tailscale.GetStatusAsync());
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Tailscale name lookup failed: {ex}");
+            }
+        });
+
         var viewModel = new MainViewModel(
             _captureProvider,
             analyzers,
@@ -89,6 +112,7 @@ public partial class App : Application
             tailscale,
             knownDevices,
             deviceLocator,
+            nameRegistry,
             dnsService);
 
         var mainWindow = new MainWindow(viewModel);

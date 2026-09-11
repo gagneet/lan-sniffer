@@ -211,7 +211,12 @@ The **Traffic** tab aggregates captured packets into throughput over time and pe
   served from one-second buckets; the longer windows from one-minute rollups, so an hour of
   history costs sixty buckets rather than three and a half thousand.
 - **Top hosts** — every host ranked by the volume it moved inside the window, split into sent and
-  received.
+  received, labelled with the device name where one is known.
+- **Device names** — rows show a name instead of a bare address wherever the app can find one:
+  the `known-devices.json` display name (matched by configured IP or by MAC, so it follows a
+  device whose lease moved), a hostname seen in the capture, this machine's own interfaces and
+  gateway, tailnet peer names for `100.x` addresses, and hostnames learned from DNS and mDNS
+  answers — which is what labels external addresses the LAN has no other name for.
 - **Drill-down** — select a host and the chart, the flow list and the peer list all narrow to that
   address. "Show all hosts" returns to the whole-network view.
 - Quiet periods are zero-filled rather than compressed away, so the bars line up with wall-clock

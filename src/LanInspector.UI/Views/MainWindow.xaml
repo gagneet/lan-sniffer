@@ -400,7 +400,8 @@
                                                             <ColumnDefinition Width="*" />
                                                             <ColumnDefinition Width="80" />
                                                         </Grid.ColumnDefinitions>
-                                                        <TextBlock Text="{Binding Address}" FontFamily="Consolas" FontSize="11" TextTrimming="CharacterEllipsis" />
+                                                        <TextBlock Text="{Binding Display}" FontFamily="Consolas" FontSize="11" TextTrimming="CharacterEllipsis"
+                                                                   ToolTip="{Binding Address}" />
                                                         <TextBlock Grid.Column="1" Text="{Binding Bytes}" FontSize="11" Foreground="#5B6875" HorizontalAlignment="Right" />
                                                     </Grid>
                                                 </DataTemplate>
@@ -419,10 +420,20 @@
                                           RowHeaderWidth="0"
                                           BorderThickness="0">
                                     <DataGrid.Columns>
-                                        <DataGridTextColumn Header="Host" Binding="{Binding Address}" Width="*" FontFamily="Consolas" />
-                                        <DataGridTextColumn Header="Total" Binding="{Binding Total}" Width="75" />
-                                        <DataGridTextColumn Header="Sent" Binding="{Binding Sent}" Width="70" />
-                                        <DataGridTextColumn Header="Recv" Binding="{Binding Received}" Width="70" />
+                                        <DataGridTemplateColumn Header="Host" Width="*">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <StackPanel Margin="0,2">
+                                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
+                                                                   Visibility="{Binding Name, Converter={StaticResource NonEmptyToVisibility}}" />
+                                                        <TextBlock Text="{Binding Address}" FontFamily="Consolas" FontSize="11" Foreground="#5B6875" />
+                                                    </StackPanel>
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
+                                        <DataGridTextColumn Header="Total" Binding="{Binding Total}" Width="72" />
+                                        <DataGridTextColumn Header="Sent" Binding="{Binding Sent}" Width="66" />
+                                        <DataGridTextColumn Header="Recv" Binding="{Binding Received}" Width="66" />
                                     </DataGrid.Columns>
                                 </DataGrid>
                             </DockPanel>
@@ -440,12 +451,14 @@
                                           RowHeaderWidth="0"
                                           BorderThickness="0">
                                     <DataGrid.Columns>
-                                        <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="200" />
-                                        <DataGridTextColumn Header="Destination" Binding="{Binding Destination}" Width="200" />
-                                        <DataGridTextColumn Header="Protocol" Binding="{Binding Protocol}" Width="80" />
-                                        <DataGridTextColumn Header="Packets" Binding="{Binding Packets}" Width="80" />
-                                        <DataGridTextColumn Header="Bytes" Binding="{Binding Bytes}" Width="100" />
-                                        <DataGridTextColumn Header="Last seen" Binding="{Binding LastSeen}" Width="100" />
+                                        <DataGridTextColumn Header="Source device" Binding="{Binding SourceName}" Width="150" />
+                                        <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="175" FontFamily="Consolas" />
+                                        <DataGridTextColumn Header="Dest device" Binding="{Binding DestinationName}" Width="150" />
+                                        <DataGridTextColumn Header="Destination" Binding="{Binding Destination}" Width="175" FontFamily="Consolas" />
+                                        <DataGridTextColumn Header="Protocol" Binding="{Binding Protocol}" Width="70" />
+                                        <DataGridTextColumn Header="Packets" Binding="{Binding Packets}" Width="70" />
+                                        <DataGridTextColumn Header="Bytes" Binding="{Binding Bytes}" Width="85" />
+                                        <DataGridTextColumn Header="Last seen" Binding="{Binding LastSeen}" Width="80" />
                                     </DataGrid.Columns>
                                 </DataGrid>
                             </DockPanel>

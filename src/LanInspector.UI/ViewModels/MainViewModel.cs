@@ -63,6 +63,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         ITailscaleService tailscale,
         KnownDevicesConfiguration knownDevicesConfig,
         IDeviceLocatorService deviceLocator,
+        IDeviceNameResolver? deviceNameResolver = null,
         IDnsFilterService? dnsFilterService = null)
     {
         _captureProvider = captureProvider;
@@ -79,7 +80,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _dispatchToUi = dispatchToUi;
         _trafficFlowAnalyzer = new TrafficFlowAnalyzer(_trafficFlowService);
 
-        TrafficTab = new TrafficTabViewModel(_trafficFlowService);
+        TrafficTab = new TrafficTabViewModel(_trafficFlowService, deviceNameResolver);
         TopologyTab = new TopologyTabViewModel(new LocalNetworkProfileProvider(), tailscale, knownDevicesConfig);
         DnsTab = new DnsTabViewModel(dnsFilterService);
 
