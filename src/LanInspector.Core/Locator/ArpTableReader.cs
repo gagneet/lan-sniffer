@@ -25,20 +25,24 @@ public interface IArpTableReader
 public sealed partial class ArpTableReader : IArpTableReader
 {
     private readonly Func<string, string, TimeSpan, CancellationToken, Task<string>> _runProcess;
+    private readonly IReadOnlyList<(string FileName, string Arguments)> _commands;
 
     public ArpTableReader()
         : this(ProcessHelper.RunAsync)
     {
     }
 
-    internal ArpTableReader(Func<string, string, TimeSpan, CancellationToken, Task<string>> runProcess)
+    internal ArpTableReader(
+        Func<string, string, TimeSpan, CancellationToken, Task<string>> runProcess,
+        IReadOnlyList<(string FileName, string Arguments)>? commands = null)
     {
         _runProcess = runProcess;
+        _commands = commands ?? GetCommandsForPlatform();
     }
 
     public async Task<IReadOnlyList<ArpTableEntry>> ReadAsync(CancellationToken cancellationToken = default)
     {
-        foreach (var (fileName, arguments) in GetCommandsForPlatform())
+        foreach (var (fileName, arguments) in _commands)
         {
             var output = await _runProcess(fileName, arguments, TimeSpan.FromSeconds(5), cancellationToken);
             var entries = Parse(output);
@@ -51,22 +55,30 @@ public sealed partial class ArpTableReader : IArpTableReader
         return [];
     }
 
-    private static IEnumerable<(string FileName, string Arguments)> GetCommandsForPlatform()
+    /// <summary>
+    /// Commands to try, in order, until one yields entries. Every platform lists more than one,
+    /// because the first can come back empty on a trimmed image or where the tool has been
+    /// removed, and an empty ARP table is indistinguishable from a missing one.
+    /// </summary>
+    internal static IReadOnlyList<(string FileName, string Arguments)> GetCommandsForPlatform()
     {
         if (OperatingSystem.IsWindows())
         {
-            yield return ("arp", "-a");
-            yield break;
+            // netsh reports the same neighbour cache and is present on installs where arp.exe
+            // has been removed or returns nothing.
+            return [("arp", "-a"), ("netsh", "interface ip show neighbors")];
         }
 
-        // "ip neigh" is preferred on Linux because it reports entry state (REACHABLE / STALE /
-        // FAILED); "arp -an" is the fallback for minimal images and for macOS.
         if (OperatingSystem.IsLinux())
         {
-            yield return ("ip", "neigh show");
+            // "ip neigh" is preferred because it reports entry state (REACHABLE / STALE /
+            // FAILED); "arp -an" is the fallback for minimal images without iproute2.
+            return [("ip", "neigh show"), ("arp", "-an")];
         }
 
-        yield return ("arp", "-an");
+        // macOS: "arp -an" is the primary; "ip" is absent, so fall back to the unfiltered form,
+        // which still resolves names and so can populate a table the -n form left empty.
+        return [("arp", "-an"), ("arp", "-a")];
     }
 
     /// <summary>
@@ -121,7 +133,7 @@ public sealed partial class ArpTableReader : IArpTableReader
                 address,
                 normalisedMac,
                 InterfaceRegex().Match(line) is { Success: true } iface ? iface.Groups["name"].Value : null,
-                StateRegex().Match(line) is { Success: true } state ? state.Value : null));
+                StateRegex().Match(line) is { Success: true } state ? state.Value.ToUpperInvariant() : null));
         }
 
         return entries;
@@ -136,6 +148,6 @@ public sealed partial class ArpTableReader : IArpTableReader
     [GeneratedRegex(@"\b(?:dev|on)\s+(?<name>[A-Za-z0-9._-]+)")]
     private static partial Regex InterfaceRegex();
 
-    [GeneratedRegex(@"\b(REACHABLE|STALE|DELAY|PROBE|PERMANENT|NOARP|INCOMPLETE|FAILED)\b")]
+    [GeneratedRegex(@"\b(REACHABLE|STALE|DELAY|PROBE|PERMANENT|NOARP|INCOMPLETE|FAILED|UNREACHABLE)\b", RegexOptions.IgnoreCase)]
     private static partial Regex StateRegex();
 }
