@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.NetworkInformation;
+using System.Reflection;
 using System.Net.Sockets;
 using System.Text.Json;
 using LanInspector.Core.Configuration;
@@ -31,6 +32,12 @@ internal static class CliApp
             return;
         }
 
+        if (args[0] is "-v" or "--version" or "version")
+        {
+            PrintVersion();
+            return;
+        }
+
         var routeDiag = PlatformServiceFactory.CreateRouteDiagnosticsService();
         var terminalLauncher = PlatformServiceFactory.CreateTerminalLauncher();
         var capturePrereqs = PlatformServiceFactory.CreateCapturePrerequisiteService();
@@ -43,7 +50,7 @@ internal static class CliApp
         // Each command gets its own budget. A single global timeout would abort scans and radio
         // captures that legitimately run for minutes, and linking a longer token to a shorter
         // parent does not extend it — the parent still cancels the child.
-        using var cts = new CancellationTokenSource(GetCommandTimeout(command));
+        using var cts = new CancellationTokenSource(GetCommandTimeout(command, rest));
         var ct = cts.Token;
 
         switch (command)
@@ -123,7 +130,7 @@ internal static class CliApp
                 break;
 
             case "snmp":
-                await RunSnmpAsync(rest, ct);
+                await RunSnmpAsync(rest, knownDevices, ct);
                 break;
 
             case "flipper":
@@ -775,12 +782,26 @@ internal static class CliApp
         return raw is not null && int.TryParse(raw, out var parsed) ? parsed : fallback;
     }
 
+    private static TimeSpan GetCommandTimeout(string command, string[] args)
+    {
+        // "snmp --throughput N" waits N seconds between two counter reads, and each read walks
+        // several tables at three seconds a timeout. The flat 30s budget could abort it mid-sample
+        // on a slow or partly-unresponsive device, reporting a failure that was the budget's fault.
+        if (command == "snmp" && args.Contains("--throughput"))
+        {
+            return TimeSpan.FromSeconds(TryGetFlagValue(args, "--throughput", 10)) + TimeSpan.FromMinutes(2);
+        }
+
+        return GetCommandTimeout(command);
+    }
+
     private static TimeSpan GetCommandTimeout(string command) => command switch
     {
         // Active scans and radio captures are user-initiated and inherently slow.
         "nmap" => TimeSpan.FromMinutes(10),
         "pcap" => TimeSpan.FromMinutes(30),
         "flipper" => TimeSpan.FromMinutes(10),
+        "snmp" => TimeSpan.FromMinutes(2),
         "trace" => TimeSpan.FromMinutes(2),
         "recommend" or "visibility" or "check" => TimeSpan.FromMinutes(2),
         "locate" => TimeSpan.FromMinutes(3),
@@ -1147,11 +1168,19 @@ internal static class CliApp
         }
     }
 
-    private static async Task RunSnmpAsync(string[] args, CancellationToken ct)
+    private static async Task RunSnmpAsync(string[] args, IReadOnlyList<KnownDeviceDefinition> knownDevices, CancellationToken ct)
     {
+        if (args.Length > 0 && string.Equals(args[0], "discover", StringComparison.OrdinalIgnoreCase))
+        {
+            await RunSnmpDiscoverAsync(args, knownDevices, ct);
+            return;
+        }
+
         if (args.Length == 0 || !IPAddress.TryParse(args[0], out var target))
         {
             Console.Error.WriteLine("Usage: laninspector snmp <ip> [--community <community>]");
+            Console.Error.WriteLine("       laninspector snmp discover              Find which router answers SNMP");
+            Console.Error.WriteLine("       laninspector snmp <ip> --throughput [n] Whole-network throughput");
             return;
         }
 
@@ -1199,6 +1228,156 @@ internal static class CliApp
             foreach (var ip in info.IpAddresses)
                 Console.WriteLine($"    {ip}");
         }
+    }
+
+    /// <summary>
+    /// Probes every router this machine can name — each interface's gateway, every hop on the way
+    /// out, and any configured router — to find one that answers SNMP.
+    /// </summary>
+    /// <remarks>
+    /// Whole-network throughput is only available from a device that carries everyone's traffic,
+    /// and on a multi-router home network it is rarely obvious which device that is or what address
+    /// it answers on. Guessing one address at a time is slow and inconclusive; this tries them all
+    /// and says which, if any, is usable.
+    /// </remarks>
+    private static async Task RunSnmpDiscoverAsync(
+        string[] args,
+        IReadOnlyList<KnownDeviceDefinition> knownDevices,
+        CancellationToken ct)
+    {
+        var communities = args.Contains("--community")
+            ? [TryGetFlagValue(args, "--community")!]
+            : new[] { "public", "private" };
+
+        var candidates = await CollectSnmpCandidatesAsync(knownDevices, ct);
+
+        Console.WriteLine("SNMP Discovery");
+        Console.WriteLine(new string('-', 70));
+
+        if (candidates.Count == 0)
+        {
+            Console.WriteLine("No gateways or configured routers found to probe.");
+            return;
+        }
+
+        Console.WriteLine($"Probing {candidates.Count} address(es) with community string(s): {string.Join(", ", communities)}");
+        Console.WriteLine();
+
+        var service = new SnmpDiscoveryService();
+        var answered = new List<(IPAddress Address, string Community, SnmpCountersResult Counters)>();
+
+        foreach (var (address, why) in candidates)
+        {
+            foreach (var community in communities)
+            {
+                ct.ThrowIfCancellationRequested();
+
+                var counters = await service.GetInterfaceCountersAsync(address, community, ct);
+                if (counters.Succeeded)
+                {
+                    var capacity = counters.Interfaces[0].IsHighCapacity ? "64-bit counters" : "32-bit counters";
+                    Console.WriteLine($"  [YES] {address,-16} {why}");
+                    Console.WriteLine($"         community '{community}', {counters.Interfaces.Count} interface(s), {capacity}");
+                    answered.Add((address, community, counters));
+                    break;
+                }
+
+                if (community == communities[^1])
+                {
+                    Console.WriteLine($"  [no]  {address,-16} {why}");
+                }
+            }
+        }
+
+        Console.WriteLine();
+
+        if (answered.Count == 0)
+        {
+            Console.WriteLine("No device answered SNMP.");
+            Console.WriteLine();
+            Console.WriteLine("Whole-network throughput needs a device that carries everyone's traffic and will");
+            Console.WriteLine("report its counters. Most consumer mesh systems (Eero, Google Nest, Deco) expose");
+            Console.WriteLine("no SNMP at all and cannot be made to. The remaining options are:");
+            Console.WriteLine("  - enable SNMP in the router's admin pages, if it offers it at all");
+            Console.WriteLine("  - a managed switch with port mirroring, which also gives per-device detail");
+            Console.WriteLine("  - router firmware you control (OpenWrt and similar)");
+            Console.WriteLine("  - for per-device visibility without bytes: point the LAN at a Pi-hole or");
+            Console.WriteLine("    AdGuard Home instance and use the DNS Filter tab, which shows per-client activity");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        Console.WriteLine("Usable for whole-network throughput:");
+        foreach (var (address, community, _) in answered)
+        {
+            var communityArg = community == "public" ? "" : $" --community {community}";
+            Console.WriteLine($"  laninspector snmp {address} --throughput 10{communityArg}");
+        }
+    }
+
+    /// <summary>
+    /// Addresses worth probing, in the order they are most likely to be the device carrying
+    /// everyone's traffic: each interface's own gateway first, then the hops beyond it, then
+    /// anything the configuration calls a router.
+    /// </summary>
+    private static async Task<IReadOnlyList<(IPAddress Address, string Why)>> CollectSnmpCandidatesAsync(
+        IReadOnlyList<KnownDeviceDefinition> knownDevices,
+        CancellationToken ct)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var candidates = new List<(IPAddress, string)>();
+
+        void Add(IPAddress address, string why)
+        {
+            if (RouteHelpers.IsRfc1918(address) && seen.Add(address.ToString()))
+            {
+                candidates.Add((address, why));
+            }
+        }
+
+        var profile = new LocalNetworkProfileProvider().GetCurrentProfile();
+        foreach (var iface in profile.Interfaces.Where(item => item.GatewayAddress is not null))
+        {
+            Add(iface.GatewayAddress!, $"default gateway on {iface.Name}");
+        }
+
+        // Hops past the first gateway are the upstream routers on a double-NAT network, and one of
+        // them is the device that actually sees all outbound traffic.
+        try
+        {
+            var trace = await PlatformServiceFactory.CreateRouteDiagnosticsService()
+                .TraceRouteAsync(IPAddress.Parse("1.1.1.1"), ct);
+
+            foreach (var hop in trace.Hops)
+            {
+                foreach (var part in hop.Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries))
+                {
+                    if (IPAddress.TryParse(part.Trim('(', ')', '[', ']'), out var hopAddress))
+                    {
+                        Add(hopAddress, "upstream hop toward the internet");
+                    }
+                }
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // A trace needs privileges on some platforms; the gateways alone are still worth trying.
+        }
+
+        foreach (var device in knownDevices.Where(device =>
+                     device.DeviceType.Contains("router", StringComparison.OrdinalIgnoreCase) ||
+                     device.Tags.Any(tag => tag is "router" or "gateway")))
+        {
+            foreach (var ip in device.KnownIps)
+            {
+                if (IPAddress.TryParse(ip, out var address))
+                {
+                    Add(address, $"configured: {device.DisplayName}");
+                }
+            }
+        }
+
+        return candidates;
     }
 
     /// <summary>
@@ -1589,6 +1768,40 @@ internal static class CliApp
         Console.WriteLine("Tip: use --mermaid or --json for other output formats");
     }
 
+    /// <summary>
+    /// Reports the build this executable came from. A published binary is easy to keep using after
+    /// the source has moved on, and an old one simply ignores flags it does not know — so being
+    /// able to check the build is the difference between "the feature is broken" and "the feature
+    /// is not in this copy".
+    /// </summary>
+    private static void PrintVersion()
+    {
+        var assembly = Assembly.GetExecutingAssembly();
+        var informational = assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
+            .InformationalVersion ?? "unknown";
+
+        // "1.2.3+<sha>" when published with -p:SourceRevisionId.
+        var parts = informational.Split('+', 2);
+
+        Console.WriteLine($"LanInspector {parts[0]}");
+        if (parts.Length > 1)
+        {
+            Console.WriteLine($"  commit:  {parts[1]}");
+        }
+
+        Console.WriteLine($"  runtime: {System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription}");
+        Console.WriteLine($"  os:      {GetOsName()} ({System.Runtime.InteropServices.RuntimeInformation.OSArchitecture})");
+
+        // Assembly.Location is an empty string in a single-file app — which is how this ships — so
+        // the executable's own path is the only reliable source for a build time.
+        var executable = Environment.ProcessPath;
+        if (!string.IsNullOrEmpty(executable) && File.Exists(executable))
+        {
+            Console.WriteLine($"  built:   {File.GetLastWriteTime(executable):yyyy-MM-dd HH:mm}");
+        }
+    }
+
     private static void PrintHelp()
     {
         Console.WriteLine("LanInspector CLI");
@@ -1596,6 +1809,7 @@ internal static class CliApp
         Console.WriteLine("Usage: laninspector <command> [options]");
         Console.WriteLine();
         Console.WriteLine("Commands:");
+        Console.WriteLine("  version                    Show the build this executable came from");
         Console.WriteLine("  status                     Show current network and Tailscale status");
         Console.WriteLine("  interfaces                 List network interfaces");
         Console.WriteLine("  known                      List known devices from config");
@@ -1617,6 +1831,7 @@ internal static class CliApp
         Console.WriteLine("  pcap export <device> <seconds> [<file>]    Capture PCAP via tshark");
         Console.WriteLine("  dns status|summary|queries|client <ip>     DNS filter provider");
         Console.WriteLine("  snmp <ip> [--community <c>]                SNMP query");
+        Console.WriteLine("  snmp discover                              Find which router answers SNMP");
         Console.WriteLine("  snmp <ip> --throughput [<seconds>]         Whole-network throughput at a router");
         Console.WriteLine("  flipper detect                             List serial ports, identify Flipper");
         Console.WriteLine("  flipper ports                              Print Flipper port name(s)");

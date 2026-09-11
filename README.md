@@ -99,7 +99,9 @@ laninspector dns queries 50                  # Recent DNS queries
 laninspector dns client 192.168.0.50         # Queries for a specific client
 
 # SNMP
+laninspector snmp discover                   # Find which router answers SNMP
 laninspector snmp 192.168.0.1                # Query device via SNMP v2c
+laninspector snmp 192.168.0.1 --throughput 10  # Whole-network throughput at a router
 laninspector snmp 192.168.0.1 --community private
 ```
 
@@ -220,10 +222,31 @@ it needs one of:
 | **Port mirroring / SPAN** | A managed switch | Full packet visibility for mirrored ports |
 | **Run the capture on the router** | Custom firmware (OpenWrt and similar) | Full visibility, on supported hardware only |
 
-The first is the realistic one for consumer gear. Check whether your router supports it:
+The first is the realistic one for consumer gear — but only from the device that carries
+*everyone's* traffic, which on a multi-router home network is rarely the one you would guess. Let
+the application find it:
 
 ```bash
-laninspector snmp 192.168.0.1 --throughput 10
+laninspector snmp discover
+```
+
+It probes each interface's gateway, every hop on the way out (so upstream routers on a double-NAT
+network are included), and anything the configuration calls a router, then reports which answered
+and the exact command to run against it:
+
+```text
+  [no]  192.168.87.1     default gateway on Wi-Fi
+  [YES] 192.168.4.1      upstream hop toward the internet
+         community 'public', 6 interface(s), 64-bit counters
+
+Usable for whole-network throughput:
+  laninspector snmp 192.168.4.1 --throughput 10
+```
+
+Then:
+
+```bash
+laninspector snmp 192.168.4.1 --throughput 10
 ```
 
 ```text
@@ -232,9 +255,15 @@ wan                              4.21 MB/s    412 KB/s   3.4%
 lan1                             1.02 MB/s   1.98 MB/s   1.6%
 ```
 
-If it reports that counters could not be read, the router does not expose SNMP (common on consumer
-units) or the community string differs. Per-device breakdown is not available this way — interface
-counters are totals — and needs a managed switch or router-side capture.
+If nothing answers, the router does not expose SNMP. Most consumer mesh systems — Eero, Google
+Nest, Deco — expose none at all and cannot be made to, so this is a hardware fact rather than a
+configuration problem. What remains is a managed switch with port mirroring, firmware you control
+(OpenWrt and similar), or, for per-device visibility without byte counts, pointing the LAN's DNS at
+a Pi-hole or AdGuard Home instance and using the DNS Filter tab.
+
+Note also that interface counters are **totals per interface**: they show how much crossed the
+router, not which device sent it. Per-device breakdown needs the managed switch or router-side
+capture.
 
 ## Traffic View
 
@@ -283,27 +312,48 @@ The WPF project (`LanInspector.UI`) requires Windows or the `EnableWindowsTarget
 
 ## Publishing
 
-### Windows WPF
+One command builds everything — it runs the tests first, clears `artifacts/`, publishes
+self-contained single-file executables, and zips each one:
 
 ```powershell
-.\scripts\publish-windows.ps1
+.\scripts\publish-all.ps1
 ```
-
-Output: `artifacts\LanInspector-win-x64` (Npcap must be installed separately on the target machine.)
-
-### CLI (all targets)
-
-```powershell
-.\scripts\publish-cli.ps1
-```
-
-or on Linux/macOS:
 
 ```bash
-./scripts/publish-cli.sh
+./scripts/publish-all.sh          # CLI targets only; the WPF app needs Windows
 ```
 
-Targets: `win-x64`, `linux-x64`, `osx-x64`, `osx-arm64`. Artifacts written to `artifacts/`.
+| Artifact | Contents |
+|---|---|
+| `artifacts\LanInspector-win-x64` | WPF desktop application (Windows only) |
+| `artifacts\laninspector-cli-win-x64` | CLI |
+| `artifacts\laninspector-cli-linux-x64` | CLI |
+| `artifacts\laninspector-cli-osx-x64`, `-osx-arm64` | CLI |
+
+`-SkipTests` publishes without testing first; `-CliOnly` skips the desktop application.
+
+### Check what you are running
+
+Every binary is stamped with the commit it was built from:
+
+```text
+> .\artifacts\laninspector-cli-win-x64\laninspector.exe version
+LanInspector 0.6.0
+  commit:  db518e3
+  runtime: .NET 8.0.31
+  os:      Windows (X64)
+  built:   2026-09-11 17:57
+```
+
+Worth checking whenever a flag "does nothing": a published executable keeps working after the
+source moves on, and an older build simply ignores options it does not know rather than reporting
+them as unrecognised. `-dirty` on the commit means it was built from a working tree with
+uncommitted changes.
+
+The individual scripts (`publish-windows.ps1`, `publish-cli.ps1`, `publish-cli.sh`) still exist for
+publishing one thing at a time.
+
+Npcap must be installed separately on the target Windows machine for packet capture.
 
 ## Security and Privacy
 
