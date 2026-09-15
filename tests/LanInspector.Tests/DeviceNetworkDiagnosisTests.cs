@@ -209,6 +209,8 @@ public sealed class DeviceNetworkDiagnosisTests
     [InlineData("-oProxyCommand=calc", "192.168.0.148")]
     [InlineData("gagneet", "-oProxyCommand=calc")]
     [InlineData("gagneet", "host name")]
+    [InlineData("gagneet%h", "192.168.0.148")]
+    [InlineData("gagneet", "fe80::1%eth0")]
     public async Task InspectAsync_DestinationThatCouldBeReadAsAnOption_IsRefusedWithoutRunningSsh(string user, string host)
     {
         var ran = false;

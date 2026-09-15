@@ -98,7 +98,9 @@ public sealed partial class SshNetworkInspector : IDeviceNetworkInspector
         CancellationToken cancellationToken = default)
     {
         // Both values land on a command line. No login name, hostname or address needs characters
-        // outside these, and a leading '-' would be read by ssh as an option.
+        // outside these, and a leading '-' would be read by ssh as an option. '%' is excluded too:
+        // ssh expands %-tokens in some config directives, and only an IPv6 scope id would need it,
+        // which is never passed here.
         if (!SafeTokenRegex().IsMatch(user) || !SafeTokenRegex().IsMatch(host) || port is < 1 or > 65535)
         {
             return DeviceNetworkInspection.Failed($"'{user}@{host}:{port}' is not a usable SSH destination.");
@@ -155,6 +157,6 @@ public sealed partial class SshNetworkInspector : IDeviceNetworkInspector
             ?? $"ssh to {host} failed without saying why.";
     }
 
-    [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9._:%-]*$")]
+    [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9._:-]*$")]
     private static partial Regex SafeTokenRegex();
 }
