@@ -236,13 +236,17 @@ internal static class CliApp
 
     private static DeviceLocatorService CreateLocator(ITailscaleService tailscale)
     {
+        var vendors = new OuiVendorLookup();
+        vendors.LoadBuiltIn();
+
         return new DeviceLocatorService(
             tailscale,
             new LocalNetworkProfileProvider(),
             new ArpTableReader(),
             new PortScanner(),
             new HostnameResolver(),
-            new DeviceLocationHistoryStore());
+            new DeviceLocationHistoryStore(),
+            networkInspector: new SshNetworkInspector(vendors));
     }
 
     private static async Task RunLocateAsync(
@@ -269,7 +273,12 @@ internal static class CliApp
             return;
         }
 
-        var options = DeviceLocatorOptions.Default with { UseTailscalePingProbe = probe };
+        var options = DeviceLocatorOptions.Default with
+        {
+            UseTailscalePingProbe = probe,
+            InspectOverSsh = !args.Contains("--no-ssh"),
+            SweepLocalSubnets = !args.Contains("--no-sweep")
+        };
         var locations = await CreateLocator(tailscale).LocateAllAsync(targets, options, ct);
 
         if (asJson)
@@ -288,6 +297,25 @@ internal static class CliApp
                 previousAddress = location.PreviousAddress?.ToString(),
                 addressChangedAt = location.AddressChangedAt,
                 hasMoved = location.HasMoved,
+                natAddress = location.NatAddress?.ToString(),
+                unapprovedRoutes = location.UnapprovedRoutes,
+                network = location.NetworkReport is not { } report ? null : new
+                {
+                    hostname = report.Hostname,
+                    path = report.DescribePath(),
+                    gateway = report.Gateway?.ToString(),
+                    gatewayMac = report.GatewayMac,
+                    gatewayVendor = report.GatewayVendor,
+                    routers = report.RouterChain.Select(router => router.ToString()),
+                    interfaces = report.Interfaces.Select(item => new
+                    {
+                        name = item.Name,
+                        address = item.Address.ToString(),
+                        prefixLength = item.PrefixLength,
+                        mac = item.Mac
+                    }),
+                    advertisedRoutes = report.AdvertisedRoutes
+                },
                 candidates = location.Candidates.Select(candidate => new
                 {
                     address = candidate.Address.ToString(),
@@ -337,18 +365,33 @@ internal static class CliApp
                 Console.WriteLine($"  Changed        : was {location.PreviousAddress}{changed}");
             }
 
+            if (location.NetworkReport is { } report)
+            {
+                Console.WriteLine($"  Connected via  : {report.DescribePath()}");
+                if (report.GatewayMac is not null)
+                {
+                    Console.WriteLine($"  Gateway MAC    : {report.GatewayMac}" +
+                                      (string.IsNullOrWhiteSpace(report.GatewayVendor) ? "" : $"  ({report.GatewayVendor})"));
+                }
+            }
+
+            if (location.NatAddress is not null)
+            {
+                Console.WriteLine($"  Reached through: {location.NatAddress}  (a router in front of it, not the device)");
+            }
+
+            foreach (var unapproved in location.UnapprovedRoutes)
+            {
+                Console.WriteLine($"  Tailscale route: {unapproved} is advertised but NOT approved");
+            }
+
             // "Confidence: Low" on its own sends people hunting for a fault on the target. The usual
             // cause on a multi-router home network is that this machine has no route to it at all.
-            if (location.CurrentAddress is not null && location.Confidence != LocationConfidence.Confirmed)
+            if ((location.CurrentAddress is not null || location.NatAddress is not null)
+                && location.Confidence != LocationConfidence.Confirmed)
             {
-                var route = await routeDiag.GetRouteToAsync(location.CurrentAddress, ct);
-                var diagnosis = ReachabilityExplainer.Explain(
-                    location.CurrentAddress,
-                    profile,
-                    route,
-                    serviceAnswered: false,
-                    location.TailscaleAddress,
-                    location.TailscaleName);
+                var route = location.CurrentAddress is null ? null : await routeDiag.GetRouteToAsync(location.CurrentAddress, ct);
+                var diagnosis = ReachabilityExplainer.Explain(location, profile, route, serviceAnswered: false);
 
                 if (diagnosis.HasDiagnosis)
                 {
@@ -1372,7 +1415,7 @@ internal static class CliApp
 
             foreach (var hop in trace.Hops)
             {
-                foreach (var part in hop.Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries))
+                foreach (var part in hop.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries))
                 {
                     if (IPAddress.TryParse(part.Trim('(', ')', '[', ']'), out var hopAddress))
                     {
@@ -1837,6 +1880,8 @@ internal static class CliApp
         Console.WriteLine("  known                      List known devices from config");
         Console.WriteLine("  locate [<id>] [--probe]    Find a known device's current LAN IP (alias: whereis)");
         Console.WriteLine("                             --json for machine-readable output");
+        Console.WriteLine("                             --no-ssh: do not log in to ask the device for its network");
+        Console.WriteLine("                             --no-sweep: do not ping this machine's subnets to find a moved MAC");
         Console.WriteLine("  check <id>                 Check reachability of a known device");
         Console.WriteLine("  check-ip <ip> [--port <p>] Check reachability of an IP/port");
         Console.WriteLine("  route <ip>                 Show route to an IP address");

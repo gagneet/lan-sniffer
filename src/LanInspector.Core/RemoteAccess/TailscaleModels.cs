@@ -19,7 +19,8 @@ public sealed record TailscaleDevice(
     IPEndPoint? CurrentAddress = null,
     IReadOnlyList<IPAddress>? PeerApiAddresses = null,
     string? OperatingSystem = null,
-    DateTimeOffset? LastSeen = null)
+    DateTimeOffset? LastSeen = null,
+    IReadOnlyList<string>? PrimaryRoutes = null)
 {
     /// <summary>
     /// Endpoints Tailscale has learned for this peer. When a direct (non-DERP) path is up,
@@ -28,6 +29,12 @@ public sealed record TailscaleDevice(
     public IReadOnlyList<IPEndPoint> Endpoints { get; init; } = Endpoints ?? [];
 
     public IReadOnlyList<IPAddress> PeerApiAddresses { get; init; } = PeerApiAddresses ?? [];
+
+    /// <summary>
+    /// Subnet routes this peer serves to the tailnet. A route appears here only once it is both
+    /// advertised by the peer and approved in the admin console; advertised alone, it does nothing.
+    /// </summary>
+    public IReadOnlyList<string> PrimaryRoutes { get; init; } = PrimaryRoutes ?? [];
 
     /// <summary>
     /// Private (RFC1918) addresses Tailscale associates with this peer, best evidence first:

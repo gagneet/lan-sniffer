@@ -24,7 +24,7 @@ public static class MacAddressFormatter
 
         if (trimmed.Contains(':') || trimmed.Contains('-'))
         {
-            var octets = trimmed.Split([':', '-'], StringSplitOptions.TrimEntries);
+            var octets = trimmed.Split(new[] { ':', '-' }, StringSplitOptions.TrimEntries);
             if (octets.Length == 6 && octets.All(octet => octet.Length is 1 or 2 && octet.All(Uri.IsHexDigit)))
             {
                 return string.Concat(octets.Select(octet => octet.PadLeft(2, '0'))).ToUpperInvariant();
@@ -48,5 +48,15 @@ public static class MacAddressFormatter
         }
 
         return string.Join(':', Enumerable.Range(0, 6).Select(index => normalised.Substring(index * 2, 2)));
+    }
+
+    /// <summary>
+    /// True for a MAC the device made up rather than one burned in by its manufacturer, as phones
+    /// and laptops do per network. It names no vendor, and one device can show several.
+    /// </summary>
+    public static bool IsLocallyAdministered(string? macAddress)
+    {
+        var normalised = Normalise(macAddress);
+        return normalised.Length == 12 && (Convert.ToByte(normalised[..2], 16) & 0x02) == 0x02;
     }
 }

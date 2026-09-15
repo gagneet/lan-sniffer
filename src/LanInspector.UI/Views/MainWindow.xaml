@@ -273,8 +273,8 @@
                                                         Margin="0,2,0,0"
                                                         Padding="4"
                                                         Cursor="Hand"
-                                                        ToolTip="Show why"
-                                                        Visibility="{Binding HasDiagnosis, Converter={StaticResource BoolToVisibility}}">
+                                                        ToolTip="Show details"
+                                                        Visibility="{Binding HasDetails, Converter={StaticResource BoolToVisibility}}">
                                                     <Button.Template>
                                                         <ControlTemplate TargetType="Button">
                                                             <Border Background="Transparent" Padding="{TemplateBinding Padding}">
@@ -299,9 +299,19 @@
                                                     Margin="37,0,8,12" Padding="13,11"
                                                     Visibility="{Binding IsExpanded, Converter={StaticResource BoolToVisibility}}">
                                                 <StackPanel>
-                                                    <TextBlock Text="{Binding Diagnosis}" FontSize="12" Foreground="#405162" TextWrapping="Wrap" LineHeight="18" />
+                                                    <TextBlock Text="{Binding Diagnosis}" FontSize="12" Foreground="#405162" TextWrapping="Wrap" LineHeight="18"
+                                                               Visibility="{Binding Diagnosis, Converter={StaticResource NonEmptyToVisibility}}" />
                                                     <TextBlock Text="{Binding Remedy}" FontSize="12" Foreground="#405162" TextWrapping="Wrap" LineHeight="18" Margin="0,6,0,0"
                                                                Visibility="{Binding Remedy, Converter={StaticResource NonEmptyToVisibility}}" />
+                                                    <!-- The device's own account of its connection: interface, gateway, routers beyond. -->
+                                                    <StackPanel Margin="0,9,0,0" Visibility="{Binding NetworkPath, Converter={StaticResource NonEmptyToVisibility}}">
+                                                        <TextBlock Text="Connected via" FontSize="11" FontWeight="SemiBold" Foreground="#5B6875" />
+                                                        <TextBlock Text="{Binding NetworkPath}" FontFamily="Consolas" FontSize="11" Foreground="#405162" Margin="0,3,0,0" TextWrapping="Wrap" />
+                                                    </StackPanel>
+                                                    <StackPanel Margin="0,9,0,0" Visibility="{Binding ReachedThrough, Converter={StaticResource NonEmptyToVisibility}}">
+                                                        <TextBlock Text="Reached through" FontSize="11" FontWeight="SemiBold" Foreground="#5B6875" />
+                                                        <TextBlock Text="{Binding ReachedThrough}" FontFamily="Consolas" FontSize="11" Foreground="#405162" Margin="0,3,0,0" TextWrapping="Wrap" />
+                                                    </StackPanel>
                                                     <Border BorderBrush="#EEF2F5" BorderThickness="0,1,0,0" Margin="0,9,0,0" Padding="0,9,0,0">
                                                         <StackPanel Orientation="Horizontal">
                                                             <StackPanel Margin="0,0,20,0">

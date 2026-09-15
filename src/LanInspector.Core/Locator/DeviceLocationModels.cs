@@ -11,23 +11,26 @@ public enum LocationSource
     /// <summary>The MAC is in this machine's ARP cache, so the device is on this segment now.</summary>
     ArpTable = 0,
 
+    /// <summary>The device itself, asked over SSH, reports holding this address.</summary>
+    DeviceReported = 1,
+
     /// <summary>Tailscale has an active direct (non-relayed) path to the peer at this address.</summary>
-    TailscaleDirectPath = 1,
+    TailscaleDirectPath = 2,
 
     /// <summary>A <c>tailscale ping</c> probe established a direct path to this address.</summary>
-    TailscalePing = 2,
+    TailscalePing = 3,
 
     /// <summary>Tailscale lists this as a candidate endpoint or peer-API address for the peer.</summary>
-    TailscaleEndpoint = 3,
+    TailscaleEndpoint = 4,
 
     /// <summary>A hostname (DNS, MagicDNS or mDNS) resolved to this address.</summary>
-    HostnameLookup = 4,
+    HostnameLookup = 5,
 
     /// <summary>The address recorded the last time this device was located.</summary>
-    PreviousLocation = 5,
+    PreviousLocation = 6,
 
     /// <summary>A statically configured address from <c>known-devices.json</c>; may be stale.</summary>
-    ConfiguredAddress = 6
+    ConfiguredAddress = 7
 }
 
 public enum LocationConfidence
@@ -35,7 +38,10 @@ public enum LocationConfidence
     /// <summary>A TCP connection to the device succeeded at this address.</summary>
     Confirmed,
 
-    /// <summary>Strong evidence (ARP entry or live Tailscale path) but no service probe succeeded.</summary>
+    /// <summary>
+    /// Strong evidence (ARP entry, live Tailscale path, or the device's own report) but no service
+    /// probe succeeded.
+    /// </summary>
     High,
 
     /// <summary>A single weaker signal, such as a candidate endpoint or a DNS answer.</summary>
@@ -125,6 +131,21 @@ public sealed record DeviceLocation(
     /// <summary>When the address was first observed to differ from <see cref="PreviousAddress"/>.</summary>
     public DateTimeOffset? AddressChangedAt { get; init; }
 
+    /// <summary>
+    /// What the device said about its own network when asked over SSH: its addresses, its gateway
+    /// and the routers beyond. Null when it was not asked or could not be reached.
+    /// </summary>
+    public DeviceNetworkReport? NetworkReport { get; init; }
+
+    /// <summary>
+    /// Where this machine's traffic to the device actually lands when that is not the device: the
+    /// outside address of the NAT router it sits behind, as this network sees that router.
+    /// </summary>
+    public IPAddress? NatAddress { get; init; }
+
+    /// <summary>Subnet routes the device advertises to Tailscale that have not been approved.</summary>
+    public IReadOnlyList<string> UnapprovedRoutes { get; init; } = [];
+
     public bool HasMoved => PreviousAddress is not null
         && CurrentAddress is not null
         && !PreviousAddress.Equals(CurrentAddress);
@@ -153,6 +174,7 @@ public sealed record DeviceLocation(
     public static string Describe(LocationSource source) => source switch
     {
         LocationSource.ArpTable => "ARP cache, matched by MAC",
+        LocationSource.DeviceReported => "reported by the device over SSH",
         LocationSource.TailscaleDirectPath => "Tailscale direct path",
         LocationSource.TailscalePing => "Tailscale ping probe",
         LocationSource.TailscaleEndpoint => "Tailscale candidate endpoint",

@@ -65,7 +65,21 @@ public static class TailscaleStatusParser
             ParseEndpoint(ReadString(peer, "CurAddr")),
             ParsePeerApiAddresses(peer),
             ReadString(peer, "OS"),
-            ReadTimestamp(peer, "LastSeen"));
+            ReadTimestamp(peer, "LastSeen"),
+            ReadStringArray(peer, "PrimaryRoutes"));
+    }
+
+    private static List<string> ReadStringArray(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var arrayElement) || arrayElement.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        return arrayElement.EnumerateArray()
+            .Where(item => item.ValueKind == JsonValueKind.String)
+            .Select(item => item.GetString()!)
+            .ToList();
     }
 
     private static List<IPAddress> ParseIpArray(JsonElement element, string propertyName)

@@ -62,7 +62,7 @@ public sealed class VisibilityExplanationService : IVisibilityExplanationService
             if (misconfiguration.Kind == RouteMisconfigurationKind.EgressCgnat)
             {
                 howToImprove.Add("Run a Tailscale subnet router on a machine that IS on the target subnet");
-                howToImprove.Add("Advertise the target subnet with: sudo tailscale up --advertise-routes=<subnet>");
+                howToImprove.Add("Advertise the target subnet with: sudo tailscale set --advertise-routes=<subnet>");
                 if (tailscaleStatus.State == TailscaleConnectionState.Connected)
                     howToImprove.Add("Alternatively: connect to the network that contains this subnet");
             }

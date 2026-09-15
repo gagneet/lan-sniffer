@@ -13,6 +13,24 @@ public sealed record DeviceLocatorOptions
     /// </summary>
     public bool UseTailscalePingProbe { get; init; }
 
+    /// <summary>
+    /// Log in to the device over SSH and ask it for its own addresses, gateway and routers. Only
+    /// tried for a device with an SSH profile, through its Tailscale address or a LAN address that
+    /// has already accepted an SSH connection, and with keys only — never a password prompt. It is
+    /// the one way to tell a device behind a NAT router from that router, and opt-in because it
+    /// logs in to the device.
+    /// </summary>
+    public bool InspectOverSsh { get; init; }
+
+    /// <summary>
+    /// When a device's MAC is configured but not in the ARP cache, ping every address on this
+    /// machine's own subnets and read the cache again. The operating system resolves each address
+    /// it pings, so a device that took a new lease after a router or switch restart turns up by
+    /// its MAC even when it answers nothing — no SSH, DNS or Tailscale needed. Only subnets of
+    /// /22 or smaller are swept, and at most once per batch.
+    /// </summary>
+    public bool SweepLocalSubnets { get; init; }
+
     /// <summary>Confirm candidates with a TCP connection before accepting them.</summary>
     public bool VerifyWithTcpProbe { get; init; } = true;
 

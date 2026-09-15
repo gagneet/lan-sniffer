@@ -17,7 +17,7 @@ an application update would overwrite.
 | **Subnets** | For a router known by the range it serves, and to tell the locator that an off-subnet address is legitimate for this device rather than noise from a peer's container bridges. |
 | **Hostnames** | Used for DNS and mDNS (`<name>.local`) lookups when the device is on another segment. |
 | **Tailscale names** | Matches the tailnet peer, which supplies both the stable overlay address and live LAN endpoint evidence. |
-| **SSH / user / port** | Enables the SSH buttons and tells the locator which port to probe when verifying an address. |
+| **SSH / user / port** | Enables the SSH buttons and tells the locator which port to probe when verifying an address. With a key loaded in `ssh-agent`, the locator also logs in (keys only, never a password) to ask the device its own addresses, gateway and the routers beyond. That is how a device behind another router is told apart from the router. |
 | **Tags** | Free-form. `server` additionally opts a device into `laninspector tailscale routes`. |
 
 Lists accept commas or semicolons: `192.168.0.148, 192.168.0.149`.
@@ -51,10 +51,18 @@ Because they merge by id, a later file only needs the fields you want to change:
 |---|---|
 | Linux | `ip link show` — the `link/ether` value for the LAN interface |
 | macOS | `ifconfig en0` — the `ether` value |
-| Windows | `ipconfig /all` — "Physical Address" |
+| Windows | `ipconfig /all` — "Physical Address", or `getmac /v` |
+| The router | Its DHCP client list or connected-devices page |
 | From another machine | `laninspector locate <id>` lists what the ARP cache holds |
 
 Any notation works — `aa:bb:cc:dd:ee:ff`, `AA-BB-CC-DD-EE-FF`, or bare hex.
+
+Record it once, while you have access, and the device no longer needs anything running on it to be
+found. When its MAC is missing from the ARP cache after a router or switch restart, `locate` pings
+every address on this machine's own subnets and reads the cache again. The device turns up by MAC
+even with SSH off and every port closed. This only reaches subnets this machine is on; for a device
+behind another router, see
+[When SSH is off, or the address has changed](tracking-a-moving-server-ip.md#when-ssh-is-off-or-the-address-has-changed).
 
 **Wi-Fi MACs are often randomised.** A MAC whose second hex digit is `2`, `6`, `A` or `E`
 (`86:61:7a:…`) has the locally-administered bit set: it is a private address that will change and
@@ -97,7 +105,7 @@ The fields that matter, and where each value comes from:
 | `knownSubnets` | The subnet the server sits in | **Both** subnets — this is what tells the locator its off-subnet address is legitimate rather than noise |
 | `knownHostnames` | `hostname` | `scutil --get LocalHostName` |
 | `knownTailscaleNames` | `tailscale status` → the peer's name | Same, if it is on the tailnet |
-| `ssh.user` | The account you log in as | Remote Login must be on in Sharing, or probes fall back to ICMP |
+| `ssh.user` | The account you log in as. Its key must be in `~/.ssh/authorized_keys` for the locator to ask the server how it is connected | Remote Login must be on in Sharing, or probes fall back to ICMP |
 
 ## A worked example
 

@@ -25,17 +25,22 @@ laninspector locate home-server
 
 ```text
 Home Server (ubuntu-svr) (home-server)
-  Current LAN IP : 192.168.0.154
+  Current LAN IP : 192.168.0.148
   Found via      : ARP cache, matched by MAC
   Confidence     : Confirmed
   Tailscale      : 100.83.183.74  (ubuntu-svr.tail7f7c1e.ts.net)
-  Changed        : was 192.168.0.148 at 2026-09-10 21:04:11Z
+  Changed        : was 192.168.0.137 at 2026-09-10 21:04:11Z
 ```
 
-Evidence is gathered from the ARP cache (matched by MAC), Tailscale's live peer endpoints,
-`tailscale ping`, DNS/mDNS, the last known address, and the configured address — ranked, then
+Evidence is gathered from the ARP cache (matched by MAC, after sweeping this machine's subnets if
+the MAC has gone missing), the device itself over SSH, Tailscale's live peer endpoints,
+`tailscale ping`, DNS/mDNS, the last known address, and the configured address. It is ranked, then
 verified with a TCP probe. The first candidate that answers wins; if none answer, the strongest
 unverified candidate is reported and flagged as such.
+
+For a device behind another router, `locate` shows the router it hangs off and the routers beyond,
+names the NAT address its traffic actually lands on, and flags a Tailscale subnet route that is
+advertised but not approved.
 
 See [Tracking a Server Whose IP Keeps Changing](docs/tracking-a-moving-server-ip.md) for the full
 walkthrough, including DHCP reservations and Tailscale subnet routes.
@@ -62,6 +67,8 @@ laninspector locate                          # Find the current LAN IP of every 
 laninspector locate home-server              # ...or of one device (alias: whereis)
 laninspector locate home-server --probe      # Also run 'tailscale ping' to force a direct path
 laninspector locate --json                   # Machine-readable output for scripting
+laninspector locate home-server --no-ssh     # Do not log in to ask the device for its network
+laninspector locate home-server --no-sweep   # Do not ping this machine's subnets to find a moved MAC
 laninspector check home-server               # Check reachability of a known device
 laninspector check-ip 192.168.87.243 --port 22
 laninspector route 192.168.87.243            # Route to IP
@@ -113,7 +120,7 @@ The `recommend` command analyses your known devices and the current network to s
 
 1. **Direct LAN IP** — if SSH port is reachable from the current machine.
 2. **Tailscale IP / hostname** — if the device is found in your Tailscale tailnet.
-3. **Subnet route guidance** — if the route exits via CGNAT (`100.64.0.0/10`), the app warns you and shows the `tailscale up --advertise-routes` command to run on a Linux server.
+3. **Subnet route guidance** — if the route exits via CGNAT (`100.64.0.0/10`), the app warns you and shows the `tailscale set --advertise-routes` command to run on a Linux server.
 
 ## Tailscale Integration
 
@@ -406,7 +413,7 @@ Npcap must be installed separately on the target Windows machine for packet capt
 - RFC1918 / CGNAT route misconfiguration detection (e.g. Eero routing 192.168.87.x upstream via 100.64.x.x).
 - **Topology snapshot** with node/edge model, confidence levels (Confirmed/High/Medium/Low/Unknown), evidence tracking, and Mermaid diagram export.
 - **Visibility explanation engine** — explains in plain English whether a machine can reach a target IP and why.
-- **Device locator** — resolves a known device's current LAN IP from the ARP cache (by MAC), Tailscale peer endpoints, `tailscale ping`, DNS/mDNS, remembered and configured addresses; verifies by TCP probe with an ICMP fallback, ranks candidates by whether this machine could plausibly reach them (so a peer's Docker bridges do not masquerade as its LAN address), reports every address a multi-homed device answers on, and records address changes over time.
+- **Device locator** — resolves a known device's current LAN IP from the ARP cache (by MAC), Tailscale peer endpoints, `tailscale ping`, DNS/mDNS, remembered and configured addresses; verifies by TCP probe with an ICMP fallback, ranks candidates by whether this machine could plausibly reach them (so a peer's Docker bridges do not masquerade as its LAN address), reports every address a multi-homed device answers on, and records address changes over time. When a device's MAC has gone missing it sweeps this machine's subnets to find it again. For a device with an SSH profile it logs in (keys only) to read the device's own addresses, gateway and router chain. It flags a NAT router in front of a device instead of reporting that router's address as the device's, and warns about a Tailscale subnet route that is advertised but not approved.
 - **Traffic flow aggregation** — live packets/sec, bytes/sec, per-flow tracking, per-host top-talker ranking, and a throughput chart covering up to three hours with per-host drill-down.
 - **Passive LLDP analyzer** — captures EtherType 0x88CC frames and extracts chassis ID, port ID, system name, management address.
 - **Nmap integration** — optional ping sweep, TCP connect scan, service detection. Parses XML output.
@@ -441,9 +448,9 @@ icon). `assets/laninspector-logo.svg` is the vector master and mirrors the same 
 ```text
 Origin NBN / Internet
   -> Eero 6+ router, subnet 192.168.4.0/24
-     -> FAST5366LTE-A / Optus modem-router, subnet 192.168.0.0/24
-        -> Google Nest router/mesh, subnet 192.168.87.0/24
-        -> TP-Link unmanaged 5-port switch
+     -> Google Nest router/mesh, subnet 192.168.87.0/24
+        -> FAST5366LTE-A / Optus modem-router, subnet 192.168.0.0/24
+           -> unmanaged switch
 ```
 
 Known behaviour:

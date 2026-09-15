@@ -88,7 +88,7 @@ public sealed class KnownDeviceDraft
 
     /// <summary>Accepts commas or semicolons, and tolerates stray whitespace around entries.</summary>
     private static IEnumerable<string> Split(string value) =>
-        value.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        value.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
     /// <summary>Derives an id from a display name, for a row the user did not give one.</summary>
     private static string Slug(string value)

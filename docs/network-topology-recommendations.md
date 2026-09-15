@@ -96,7 +96,7 @@ own DHCP, guest network and eero Secure features, since those need it to be the 
 
 **CGNAT still blocks all inbound connections from the internet.** `100.96.16.1` is the ISP's NAT,
 not yours, and no amount of reorganising the house changes it. Reaching anything from outside
-still means Tailscale (or an equivalent), which is why `tailscale up --advertise-routes` is worth
+still means Tailscale (or an equivalent), which is why `tailscale set --advertise-routes` is worth
 keeping regardless of the topology.
 
 Flattening the network makes everything reachable *inside* the house and gives monitoring a place
