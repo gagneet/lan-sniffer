@@ -1,5 +1,6 @@
 using System.Net;
 using LanInspector.Core.Configuration;
+using LanInspector.Core.Discovery;
 using LanInspector.Core.Identity;
 using LanInspector.Core.Locator;
 using LanInspector.Core.Network;
@@ -27,16 +28,25 @@ public sealed class DeviceLocatorTests
     private static DeviceLocatorService CreateLocator(
         IReadOnlyList<ArpTableEntry>? arpEntries = null,
         TailscaleStatus? tailscale = null,
-        DeviceLocationHistoryStore? history = null)
+        DeviceLocationHistoryStore? history = null,
+        IDeviceNetworkInspector? inspector = null,
+        INetworkDiscovery? sweeper = null,
+        IArpTableReader? arpReader = null)
     {
         return new DeviceLocatorService(
             new FakeTailscaleService(tailscale ?? new TailscaleStatus(TailscaleConnectionState.NotInstalled, [], [])),
             new FakeProfileProvider(),
-            new FakeArpTableReader(arpEntries ?? []),
+            arpReader ?? new FakeArpTableReader(arpEntries ?? []),
             new PortScanner(),
-            new HostnameResolver(),
-            history);
+            NoDns(),
+            history,
+            networkInspector: inspector,
+            subnetSweeper: sweeper);
     }
+
+    // Real DNS makes results depend on the machine running the tests: on a host named after the
+    // device under test, "ubuntu-svr" resolves to that host.
+    private static HostnameResolver NoDns() => new((_, _) => Task.FromResult(Array.Empty<IPAddress>()));
 
     // Probing is disabled in these tests: they assert how evidence is ranked, and nothing in a
     // build environment answers on 192.168.0.x.
@@ -182,7 +192,7 @@ public sealed class DeviceLocatorTests
             new FakeProfileProvider(),
             new FakeArpTableReader([]),
             new PortScanner(),
-            new HostnameResolver());
+            NoDns());
 
         var device = HomeServer(ips: [], tailscaleNames: ["ubuntu-svr"]);
 
@@ -242,7 +252,7 @@ public sealed class DeviceLocatorTests
         var tailscale = new FakeTailscaleService(new TailscaleStatus(TailscaleConnectionState.NotInstalled, [], []));
 
         var locator = new DeviceLocatorService(
-            tailscale, new FakeProfileProvider(), arp, new PortScanner(), new HostnameResolver());
+            tailscale, new FakeProfileProvider(), arp, new PortScanner(), NoDns());
 
         var devices = new[] { "first", "second", "third" }
             .Select(id => new KnownDeviceDefinition { Id = id, DisplayName = id, KnownIps = ["192.168.0.148"] })
@@ -429,14 +439,204 @@ public sealed class DeviceLocatorTests
         Assert.Equal(CandidatePlausibility.ConfiguredForDevice, moved.Plausibility);
     }
 
-    private sealed class FakeArpTableReader(IReadOnlyList<ArpTableEntry> entries) : IArpTableReader
+    [Fact]
+    public async Task LocateAsync_DirectPathEndsAtSomeoneElsesMac_IsTheRouterInFrontNotTheDevice()
+    {
+        // From outside a NAT router, Tailscale's direct path to a device behind it ends at the
+        // router's outside address, and this machine's ARP cache holds the router's MAC there.
+        var locator = CreateLocator(
+            arpEntries: [new ArpTableEntry(IPAddress.Parse("192.168.0.23"), "44ADB1D63959", "eth0", "REACHABLE")],
+            tailscale: new TailscaleStatus(TailscaleConnectionState.Connected, [ServerPeerAt("192.168.0.23")], [], "my-laptop"));
+
+        var location = await locator.LocateAsync(
+            HomeServer(macs: ["68:1d:ef:3c:d5:45"], ips: ["10.0.5.148"], tailscaleNames: ["ubuntu-svr"]),
+            NoProbe);
+
+        Assert.Equal("192.168.0.23", location.NatAddress?.ToString());
+        Assert.DoesNotContain(location.Candidates, candidate => candidate.Address.ToString() == "192.168.0.23");
+        Assert.Equal("10.0.5.148", location.CurrentAddress?.ToString());
+        Assert.Contains(location.Evidence, line => line.Contains("sits behind"));
+    }
+
+    [Fact]
+    public async Task LocateAsync_DirectPathWithARandomisedMac_IsNotMistakenForARouter()
+    {
+        // The device itself may use a private MAC on one interface, so it proves nothing.
+        var locator = CreateLocator(
+            arpEntries: [new ArpTableEntry(IPAddress.Parse("192.168.0.23"), "86617AC61F7F", "eth0", "REACHABLE")],
+            tailscale: new TailscaleStatus(TailscaleConnectionState.Connected, [ServerPeerAt("192.168.0.23")], [], "my-laptop"));
+
+        var location = await locator.LocateAsync(
+            HomeServer(macs: ["68:1d:ef:3c:d5:45"], ips: ["10.0.5.148"], tailscaleNames: ["ubuntu-svr"]),
+            NoProbe);
+
+        Assert.Null(location.NatAddress);
+        Assert.Equal("192.168.0.23", location.CurrentAddress?.ToString());
+        Assert.Equal(LocationSource.TailscaleDirectPath, location.Source);
+    }
+
+    [Fact]
+    public async Task LocateAsync_DeviceReportsItsNetwork_ReplacesTheGuesses()
+    {
+        var inspector = new FakeInspector(new DeviceNetworkInspection(DeviceNetworkReportParser.Parse(ReportBehindRouter), null));
+        var locator = CreateLocator(
+            tailscale: new TailscaleStatus(TailscaleConnectionState.Connected, [ServerPeerAt("192.168.0.23")], [], "my-laptop"),
+            inspector: inspector);
+
+        var location = await locator.LocateAsync(
+            HomeServer(ips: ["10.0.9.9"], tailscaleNames: ["ubuntu-svr"]),
+            NoProbe with { InspectOverSsh = true });
+
+        Assert.Equal(("gagneet", "100.83.183.74", 22, true), inspector.LastCall);
+        Assert.Equal("10.0.5.148", location.CurrentAddress?.ToString());
+        Assert.Equal(LocationSource.DeviceReported, location.Source);
+        Assert.Equal(LocationConfidence.High, location.Confidence);
+        Assert.Equal("192.168.0.23", location.NatAddress?.ToString());
+        Assert.Equal(["10.0.5.0/24"], location.UnapprovedRoutes);
+        Assert.NotNull(location.NetworkReport);
+        Assert.DoesNotContain(location.Candidates, candidate => candidate.Address.ToString() is "10.0.9.9" or "192.168.0.23");
+    }
+
+    [Fact]
+    public async Task LocateAsync_ApprovedRoute_IsNotReportedAsUnapproved()
+    {
+        var peer = ServerPeerAt("192.168.0.23") with { PrimaryRoutes = ["10.0.5.0/24"] };
+        var locator = CreateLocator(
+            tailscale: new TailscaleStatus(TailscaleConnectionState.Connected, [peer], [], "my-laptop"),
+            inspector: new FakeInspector(new DeviceNetworkInspection(DeviceNetworkReportParser.Parse(ReportBehindRouter), null)));
+
+        var location = await locator.LocateAsync(
+            HomeServer(tailscaleNames: ["ubuntu-svr"]),
+            NoProbe with { InspectOverSsh = true });
+
+        Assert.Empty(location.UnapprovedRoutes);
+    }
+
+    [Fact]
+    public async Task LocateAsync_NoSshProfile_NeverLogsIn()
+    {
+        var inspector = new FakeInspector(DeviceNetworkInspection.Failed("should not be called"));
+        var locator = CreateLocator(
+            tailscale: new TailscaleStatus(TailscaleConnectionState.Connected, [ServerPeerAt("192.168.0.23")], [], "my-laptop"),
+            inspector: inspector);
+
+        var device = new KnownDeviceDefinition { Id = "nas", DisplayName = "NAS", KnownTailscaleNames = ["ubuntu-svr"] };
+        await locator.LocateAsync(device, NoProbe with { InspectOverSsh = true });
+
+        Assert.Equal(0, inspector.CallCount);
+    }
+
+    [Fact]
+    public async Task LocateAsync_SshInspectionFails_SaysWhyAndKeepsTheOtherEvidence()
+    {
+        var locator = CreateLocator(
+            tailscale: new TailscaleStatus(TailscaleConnectionState.Connected, [ServerPeerAt("192.168.0.23")], [], "my-laptop"),
+            inspector: new FakeInspector(DeviceNetworkInspection.Failed("nothing accepts SSH connections on 100.83.183.74 port 22.")));
+
+        var location = await locator.LocateAsync(
+            HomeServer(tailscaleNames: ["ubuntu-svr"]),
+            NoProbe with { InspectOverSsh = true });
+
+        Assert.Contains(location.Evidence, line => line.StartsWith("Could not ask home-server over SSH: nothing accepts SSH"));
+        Assert.Null(location.NetworkReport);
+        Assert.Equal("192.168.0.23", location.CurrentAddress?.ToString());
+    }
+
+    [Fact]
+    public async Task LocateAsync_MovedDeviceMissingFromArpCache_IsFoundBySweepingTheSubnet()
+    {
+        // After a router restart the device has a new lease and nothing has spoken to it, so the
+        // cache has no entry until the sweep makes this machine resolve every address.
+        var arp = new FakeArpTableReader([], [new ArpTableEntry(IPAddress.Parse("192.168.0.77"), "9C6B00AABBCC", "eth0", "REACHABLE")]);
+        var sweeper = new FakeSweeper();
+        var locator = CreateLocator(arpReader: arp, sweeper: sweeper);
+
+        var location = await locator.LocateAsync(
+            HomeServer(macs: ["9c:6b:00:aa:bb:cc"], ips: ["192.168.0.148"]),
+            NoProbe with { SweepLocalSubnets = true });
+
+        Assert.Equal(["192.168.0.0/24"], sweeper.Swept);
+        Assert.Equal("192.168.0.77", location.CurrentAddress?.ToString());
+        Assert.Equal(LocationSource.ArpTable, location.Source);
+    }
+
+    [Fact]
+    public async Task LocateAllAsync_SweepsAtMostOncePerBatch()
+    {
+        var sweeper = new FakeSweeper();
+        var locator = CreateLocator(sweeper: sweeper);
+
+        var devices = new[] { "aa:aa:aa:aa:aa:01", "aa:aa:aa:aa:aa:02" }
+            .Select(mac => new KnownDeviceDefinition { Id = mac, DisplayName = mac, KnownMacs = [mac] })
+            .ToArray();
+
+        await locator.LocateAllAsync(devices, NoProbe with { SweepLocalSubnets = true });
+
+        Assert.Single(sweeper.Swept);
+    }
+
+    [Fact]
+    public async Task LocateAsync_MacAlreadyInArpCache_DoesNotSweep()
+    {
+        var sweeper = new FakeSweeper();
+        var locator = CreateLocator(
+            arpEntries: [new ArpTableEntry(IPAddress.Parse("192.168.0.154"), "9C6B00AABBCC", "eth0", "REACHABLE")],
+            sweeper: sweeper);
+
+        await locator.LocateAsync(HomeServer(macs: ["9c:6b:00:aa:bb:cc"]), NoProbe with { SweepLocalSubnets = true });
+
+        Assert.Empty(sweeper.Swept);
+    }
+
+    // A server on 10.0.5.0/24 behind a router that sits on this machine's 192.168.0.0/24.
+    private const string ReportBehindRouter =
+        "### os\nLinux\n### host\nubuntu-svr\n" +
+        "### ip-addr\n2: enp2s0    inet 10.0.5.148/24 brd 10.0.5.255 scope global enp2s0\n" +
+        "### ip-route\ndefault via 10.0.5.1 dev enp2s0\n" +
+        "### trace\n 1  10.0.5.1  0.3 ms\n 2  192.168.0.1  0.6 ms\n" +
+        "### tailscale-prefs\n\t\"AdvertiseRoutes\": [\n\t\t\"10.0.5.0/24\"\n\t],\n";
+
+    private static TailscaleDevice ServerPeerAt(string directPath) => new(
+        "ubuntu-svr",
+        "ubuntu-svr.tail7f7c1e.ts.net",
+        [IPAddress.Parse("100.83.183.74")],
+        IsOnline: true,
+        CurrentAddress: new IPEndPoint(IPAddress.Parse(directPath), 41641));
+
+    private sealed class FakeInspector(DeviceNetworkInspection result) : IDeviceNetworkInspector
+    {
+        public int CallCount { get; private set; }
+
+        public (string User, string Host, int Port, bool Authenticated)? LastCall { get; private set; }
+
+        public Task<DeviceNetworkInspection> InspectAsync(string user, string host, int port, bool hostIsAuthenticated, CancellationToken cancellationToken = default)
+        {
+            CallCount++;
+            LastCall = (user, host, port, hostIsAuthenticated);
+            return Task.FromResult(result);
+        }
+    }
+
+    private sealed class FakeSweeper : INetworkDiscovery
+    {
+        public List<string> Swept { get; } = [];
+
+        public Task<IReadOnlyCollection<IPAddress>> PingSweepAsync(IPAddress subnet, int cidr, CancellationToken cancellationToken = default)
+        {
+            Swept.Add($"{subnet}/{cidr}");
+            return Task.FromResult<IReadOnlyCollection<IPAddress>>([]);
+        }
+    }
+
+    /// <param name="later">What every read after the first returns, as if something refreshed the cache.</param>
+    private sealed class FakeArpTableReader(IReadOnlyList<ArpTableEntry> entries, IReadOnlyList<ArpTableEntry>? later = null) : IArpTableReader
     {
         public int ReadCallCount { get; private set; }
 
         public Task<IReadOnlyList<ArpTableEntry>> ReadAsync(CancellationToken cancellationToken = default)
         {
             ReadCallCount++;
-            return Task.FromResult(entries);
+            return Task.FromResult(ReadCallCount > 1 && later is not null ? later : entries);
         }
     }
 

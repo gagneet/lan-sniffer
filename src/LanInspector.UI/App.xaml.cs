@@ -66,7 +66,8 @@ public partial class App : Application
             new ArpTableReader(),
             portScanner,
             hostnameResolver,
-            new DeviceLocationHistoryStore());
+            new DeviceLocationHistoryStore(),
+            networkInspector: new SshNetworkInspector(vendorLookup));
         var dnsConfig = DnsIntegrationsConfigLoader.Load();
         var dnsService = DnsIntegrationsConfigLoader.CreateService(dnsConfig);
 

@@ -638,12 +638,15 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// </summary>
     private async Task<bool> RefreshCriticalDeviceAsync(CriticalDeviceViewModel criticalDevice)
     {
+        // Critical devices are few and chosen by the user, so the thorough checks are worth their
+        // cost here: logging in to ask the device (only with an SSH profile and a key), and
+        // sweeping this machine's subnet when its MAC has gone missing after a lease change.
         var location = await _deviceLocator.LocateAsync(
             criticalDevice.Definition,
-            DeviceLocatorOptions.Default,
+            DeviceLocatorOptions.Default with { InspectOverSsh = true, SweepLocalSubnets = true },
             _shutdownCancellation.Token);
 
-        if (location.CurrentAddress is null)
+        if (location.CurrentAddress is null && location.NatAddress is null)
         {
             var notFound = location.TailscaleAddress is not null
                 ? new ReachabilityDiagnosis(
@@ -662,21 +665,24 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             return false;
         }
 
-        var route = await _routeDiagnostics.GetRouteToAsync(location.CurrentAddress, _shutdownCancellation.Token);
+        var route = location.CurrentAddress is null
+            ? null
+            : await _routeDiagnostics.GetRouteToAsync(location.CurrentAddress, _shutdownCancellation.Token);
         var isOnline = location.Confidence == LocationConfidence.Confirmed;
-        var status = isOnline ? "Online" : location.Confidence == LocationConfidence.Low ? "Not reachable" : "Probable";
+
+        // "Probable" needs something to have answered. A device reported by itself, or seen through
+        // Tailscale, can be certain of its address and still have no path to it from here.
+        var status = isOnline ? "Online" : location.VerifiedAddresses.Count > 0 ? "Probable" : "Not reachable";
 
         // "Not reachable" alone sends people hunting for a fault on the target; the usual cause is
-        // that this machine is on a different subnet with no route to it.
+        // that this machine is on a different subnet with no route to it, or behind another router.
         var diagnosis = ReachabilityExplainer.Explain(
-            location.CurrentAddress,
+            location,
             _reachabilityClassifier.GetCurrentProfile(),
             route,
-            isOnline,
-            location.TailscaleAddress,
-            location.TailscaleName);
+            isOnline);
 
-        criticalDevice.ApplyLocation(location, status, isOnline, route.RouteSummary, diagnosis);
+        criticalDevice.ApplyLocation(location, status, isOnline, route?.RouteSummary ?? string.Empty, diagnosis);
         return isOnline;
     }
 
@@ -687,7 +693,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void ToggleCriticalDeviceExpansion(CriticalDeviceViewModel? device)
     {
-        if (device is null || !device.HasDiagnosis)
+        if (device is null || !device.HasDetails)
         {
             return;
         }

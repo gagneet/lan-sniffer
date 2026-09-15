@@ -41,11 +41,14 @@ public static class ProcessHelper
         return result.Started ? result.Text : string.Empty;
     }
 
+    /// <param name="standardInput">Text written to the tool's standard input, which is then closed;
+    /// null leaves standard input alone.</param>
     public static async Task<ProcessResult> TryRunAsync(
         string fileName,
         string arguments,
         TimeSpan timeout,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? standardInput = null)
     {
         Process? process = null;
         try
@@ -57,6 +60,9 @@ public static class ProcessHelper
             {
                 FileName = fileName,
                 Arguments = arguments,
+                RedirectStandardInput = standardInput is not null,
+                // No byte-order mark: a shell reading the script would take it as part of the first command.
+                StandardInputEncoding = standardInput is null ? null : new System.Text.UTF8Encoding(false),
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
@@ -83,6 +89,21 @@ public static class ProcessHelper
                 // buffer while nobody drains it never exits.
                 var outputTask = process.StandardOutput.ReadToEndAsync(timeoutCts.Token);
                 var errorTask = process.StandardError.ReadToEndAsync(timeoutCts.Token);
+
+                if (standardInput is not null)
+                {
+                    try
+                    {
+                        await process.StandardInput.WriteAsync(standardInput.AsMemory(), timeoutCts.Token);
+                        process.StandardInput.Close();
+                    }
+                    catch (IOException)
+                    {
+                        // The tool exited without reading its input, as ssh does when it cannot
+                        // connect; its output says why.
+                    }
+                }
+
                 await process.WaitForExitAsync(timeoutCts.Token);
 
                 return new ProcessResult(true, process.ExitCode, await outputTask, await errorTask, false);

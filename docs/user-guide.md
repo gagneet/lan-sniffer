@@ -214,6 +214,21 @@ SSH port:
 
 LanInspector should test configured connection candidates and recommend the best current SSH command.
 
+Each check locates the device rather than trusting the configured address:
+
+- **A MAC address finds it wherever it moves** on a subnet this machine is on. If the MAC is not in
+  the ARP cache, for example after a router restart, the check pings this machine's subnets and looks
+  again. Nothing needs to be running on the device.
+- **An SSH profile lets the check ask the device.** With your key in `ssh-agent`, it logs in (keys
+  only, never a password) and reads the device's addresses, gateway and routers beyond. Expand the row
+  to see this under **Connected via**.
+- **A device behind another router** is shown as such: its NAT router's address appears under
+  **Reached through**, not as the device's address. The explanation names the fix, usually approving
+  its Tailscale subnet route.
+
+The SSH command uses the LAN address only once a connection to it has succeeded; otherwise it uses
+the Tailscale name.
+
 ---
 
 ## 8. SSH Actions
@@ -257,7 +272,7 @@ LanInspector should parse Tailscale status where available and show whether a kn
 For a Linux server that should expose its local subnet through Tailscale, the setup assistant may generate:
 
 ```bash
-sudo tailscale up --advertise-routes=192.168.87.0/24
+sudo tailscale set --advertise-routes=192.168.87.0/24
 ```
 
 Then approve the route in the Tailscale admin console.
@@ -452,6 +467,27 @@ Recommended fixes:
 2. Use Tailscale for subnet-independent SSH.
 3. Collapse the network into fewer subnets if practical.
 4. Add static routes only if supported and understood.
+
+### Server reachable only over Tailscale
+
+Symptoms: `ssh user@<tailscale-name>` works, the LAN address does not, and the address LanInspector
+used to show is on your own subnet but is not the server.
+
+Meaning: the server sits behind a NAT router of its own. Tailscale's direct path ends at that
+router's outside address, which is what was being shown. Run `laninspector locate <id>`:
+
+```text
+  Connected via  : enp2s0 192.168.0.148/24 -> 192.168.0.1 -> 192.168.87.1
+  Reached through: 192.168.87.23  (a router in front of it, not the device)
+  Tailscale route: 192.168.0.0/24 is advertised but NOT approved
+```
+
+Recommended fixes:
+
+1. Approve the advertised route in the Tailscale admin console (Machines → the server → Edit route
+   settings). Linux clients also need `sudo tailscale set --accept-routes`.
+2. If no route is advertised, run `sudo tailscale set --advertise-routes=<subnet>` on the server first.
+3. Meanwhile, connect with the Tailscale name, which does not change.
 
 ### No devices appear
 

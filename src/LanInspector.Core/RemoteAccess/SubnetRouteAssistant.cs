@@ -8,14 +8,18 @@ public static class SubnetRouteAssistant
         "After running the command, approve the advertised subnet route in the Tailscale admin console.";
 
     private const string Explanation =
-        "Run this on an always-on Linux server or gateway device that can reach the target subnet. " +
-        "Then use Tailscale from any device to access the server or subnet remotely.";
+        "Run this on an always-on device that is on the target subnet; on Linux it also needs IP forwarding enabled. " +
+        "Then use Tailscale from any device to access the subnet remotely.";
+
+    // 'tailscale set' changes only the setting it names. 'tailscale up' given one flag refuses to
+    // run unless every other non-default setting is restated alongside it.
+    private const string CommandPrefix = "sudo tailscale set --advertise-routes=";
 
     public static string? BuildCommand(KnownDeviceDefinition device)
     {
         if (device.KnownSubnets.Count > 0)
         {
-            return $"sudo tailscale up --advertise-routes={string.Join(",", device.KnownSubnets)}";
+            return CommandPrefix + string.Join(",", device.KnownSubnets);
         }
 
         if (device.KnownIps.Count > 0)
@@ -23,7 +27,7 @@ public static class SubnetRouteAssistant
             var subnet = InferSubnet(device.KnownIps[0]);
             if (subnet is not null)
             {
-                return $"sudo tailscale up --advertise-routes={subnet}";
+                return CommandPrefix + subnet;
             }
         }
 
@@ -32,9 +36,8 @@ public static class SubnetRouteAssistant
 
     public static SubnetRouteSuggestion BuildSuggestion(params string[] subnets)
     {
-        var routeArg = string.Join(",", subnets);
         return new SubnetRouteSuggestion(
-            $"sudo tailscale up --advertise-routes={routeArg}",
+            CommandPrefix + string.Join(",", subnets),
             Explanation,
             AdminConsoleNote);
     }

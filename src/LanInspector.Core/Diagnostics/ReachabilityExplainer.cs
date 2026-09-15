@@ -1,4 +1,5 @@
 using System.Net;
+using LanInspector.Core.Locator;
 using LanInspector.Core.Network;
 
 namespace LanInspector.Core.Diagnostics;
@@ -19,7 +20,10 @@ public enum ReachabilityCause
     ServiceNotAnswering,
 
     /// <summary>Traffic for a private address is being sent upstream, typically into CGNAT.</summary>
-    RoutedUpstream
+    RoutedUpstream,
+
+    /// <summary>The target sits behind a NAT router of its own, which lets nothing in from this side.</summary>
+    BehindRouter
 }
 
 /// <param name="ShortCause">Two or three words, for a table row.</param>
@@ -100,6 +104,138 @@ public static class ReachabilityExplainer
             "Those are different subnets, and the router between them does not carry traffic from this side to that one." +
             overlay,
             "Connect to the same network as the target, add a route, or reach it over Tailscale.");
+    }
+
+    /// <summary>
+    /// Explains a located device, using what the locator learned beyond an address: the device's
+    /// own account of its routers, and the NAT router its traffic lands on.
+    /// </summary>
+    public static ReachabilityDiagnosis Explain(
+        DeviceLocation location,
+        LocalNetworkProfile profile,
+        RouteDecision? route,
+        bool serviceAnswered)
+    {
+        if (serviceAnswered)
+        {
+            return ReachabilityDiagnosis.None;
+        }
+
+        if (location.NetworkReport is { } report && ExplainFromReport(location, report, profile) is { } fromReport)
+        {
+            return fromReport;
+        }
+
+        // A device whose own gateway is on this network has no router in between, whatever else
+        // suggested one; its report outranks the guess.
+        var gatewayIsLocal = location.NetworkReport?.RouterChain.FirstOrDefault() is { } gateway
+            && profile.FindLocalInterface(gateway) is not null;
+
+        if (location.NatAddress is { } nat && !gatewayIsLocal)
+        {
+            return new ReachabilityDiagnosis(
+                ReachabilityCause.BehindRouter,
+                "behind another router",
+                $"Traffic for {location.DisplayName} ends at {nat}, a router it sits behind. Its own address is on that router's " +
+                "inside network, and a NAT router lets nothing in from outside unless a port is forwarded." +
+                DescribeOverlay(location.TailscaleAddress, location.TailscaleName),
+                BuildRemedy(location, network: null));
+        }
+
+        return location.CurrentAddress is null
+            ? ReachabilityDiagnosis.None
+            : Explain(location.CurrentAddress, profile, route, serviceAnswered, location.TailscaleAddress, location.TailscaleName);
+    }
+
+    /// <summary>
+    /// Walks the device's routers outward until one is on a network this machine is on. Every
+    /// router before that one stands between the two machines.
+    /// </summary>
+    private static ReachabilityDiagnosis? ExplainFromReport(DeviceLocation location, DeviceNetworkReport report, LocalNetworkProfile profile)
+    {
+        var chain = report.RouterChain;
+        var primary = report.PrimaryInterface;
+        if (chain.Count == 0 || primary is null)
+        {
+            return null;
+        }
+
+        var joinIndex = -1;
+        for (var index = 0; index < chain.Count; index++)
+        {
+            if (profile.FindLocalInterface(chain[index]) is not null)
+            {
+                joinIndex = index;
+                break;
+            }
+        }
+
+        // The device's own gateway is on this network, so no router stands in between.
+        if (joinIndex == 0)
+        {
+            return null;
+        }
+
+        var name = location.DisplayName;
+        var network = primary.Network?.ToString() ?? $"{primary.Address}/{primary.PrefixLength}";
+        var vendor = string.IsNullOrWhiteSpace(report.GatewayVendor) ? string.Empty : $" ({report.GatewayVendor})";
+        var overlay = DescribeOverlay(location.TailscaleAddress, location.TailscaleName);
+
+        if (joinIndex > 0)
+        {
+            var local = profile.FindLocalInterface(chain[joinIndex])!;
+            var inBetween = string.Join(" and ", chain.Take(joinIndex));
+            var outside = location.NatAddress is null ? string.Empty : $", where it appears as {location.NatAddress}";
+
+            return new ReachabilityDiagnosis(
+                ReachabilityCause.BehindRouter,
+                "behind another router",
+                $"{name} is at {primary.Address} on {network}, behind {inBetween}{vendor}. That router hangs off {chain[joinIndex]} " +
+                $"on this machine's network {local.Network}{outside}. A NAT router lets nothing in from outside unless a port is " +
+                $"forwarded, so {primary.Address} cannot be reached from here." + overlay,
+                BuildRemedy(location, network));
+        }
+
+        var localNetworks = string.Join(", ", profile.Interfaces.Select(item => item.Network.ToString()).Distinct());
+        return new ReachabilityDiagnosis(
+            ReachabilityCause.DifferentSubnet,
+            "separate branches",
+            $"{name} is at {primary.Address} on {network}, behind {string.Join(" then ", chain)}{vendor}. None of those routers is on " +
+            $"this machine's network ({(localNetworks.Length == 0 ? "none" : localNetworks)}), so the two sit on separate branches." + overlay,
+            BuildRemedy(location, network));
+    }
+
+    private static string BuildRemedy(DeviceLocation location, string? network)
+    {
+        var steps = new List<string>();
+        var name = location.DisplayName;
+        var tailscaleName = location.TailscaleName ?? location.TailscaleAddress?.ToString();
+        var advertised = location.NetworkReport?.AdvertisedRoutes ?? [];
+
+        if (location.UnapprovedRoutes.Count > 0)
+        {
+            steps.Add($"Approve the {string.Join(", ", location.UnapprovedRoutes)} route in the Tailscale admin console " +
+                      $"(Machines → {tailscaleName ?? name} → Edit route settings); the LAN address then works from any device on the tailnet.");
+        }
+        else if (advertised.Count > 0)
+        {
+            steps.Add("Its subnet route is approved; a Linux client also needs 'sudo tailscale set --accept-routes' to use it.");
+        }
+        else if (network is not null && location.TailscaleAddress is not null)
+        {
+            steps.Add($"Run 'sudo tailscale set --advertise-routes={network}' on {name}, then approve the route in the Tailscale admin console.");
+        }
+
+        steps.Add(tailscaleName is not null
+            ? $"Meanwhile, connect over Tailscale: {tailscaleName}."
+            : $"Install Tailscale on {name} to reach it from anywhere.");
+
+        if (location.NatAddress is not null)
+        {
+            steps.Add($"Alternatively, forward a port on that router and connect to {location.NatAddress}, or move {name} onto this network.");
+        }
+
+        return string.Join(" ", steps);
     }
 
     /// <summary>The detail and remedy as one sentence, for output with no room for structure.</summary>

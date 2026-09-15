@@ -6,6 +6,22 @@ namespace LanInspector.Core.Identity;
 
 public sealed class HostnameResolver
 {
+    private readonly Func<string, CancellationToken, Task<IPAddress[]>> _lookupIpv4;
+
+    public HostnameResolver()
+        : this((hostname, cancellationToken) => SystemDns.GetHostAddressesAsync(hostname, AddressFamily.InterNetwork, cancellationToken))
+    {
+    }
+
+    /// <summary>
+    /// Lets tests replace DNS. A real lookup makes results depend on the machine running them: on a
+    /// host that is itself named after the device under test, the name resolves to that host.
+    /// </summary>
+    internal HostnameResolver(Func<string, CancellationToken, Task<IPAddress[]>> lookupIpv4)
+    {
+        _lookupIpv4 = lookupIpv4;
+    }
+
     public async Task<string?> TryReverseDnsAsync(string ipAddress, TimeSpan timeout)
     {
         if (!IPAddress.TryParse(ipAddress, out var address))
@@ -52,7 +68,7 @@ public sealed class HostnameResolver
 
         try
         {
-            var addresses = await SystemDns.GetHostAddressesAsync(hostname, AddressFamily.InterNetwork, cts.Token);
+            var addresses = await _lookupIpv4(hostname, cts.Token);
             return addresses;
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested)

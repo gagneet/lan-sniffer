@@ -82,7 +82,20 @@ public sealed partial class CriticalDeviceViewModel : ObservableObject
     /// <summary>Two or three words naming why it is unreachable, sized for the row.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasDiagnosis))]
+    [NotifyPropertyChangedFor(nameof(HasDetails))]
     private string _cause = string.Empty;
+
+    /// <summary>
+    /// The device's own account of how it is connected, from its interface out through its routers.
+    /// Empty unless it was asked over SSH.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasDetails))]
+    private string _networkPath = string.Empty;
+
+    /// <summary>The router in front of the device that traffic from here actually lands on.</summary>
+    [ObservableProperty]
+    private string _reachedThrough = string.Empty;
 
     /// <summary>The full explanation, shown only when the row is expanded.</summary>
     [ObservableProperty]
@@ -96,6 +109,9 @@ public sealed partial class CriticalDeviceViewModel : ObservableObject
     private bool _isExpanded;
 
     public bool HasDiagnosis => !string.IsNullOrWhiteSpace(Cause);
+
+    /// <summary>Whether the row has anything to expand: a diagnosis, or where an online device is connected.</summary>
+    public bool HasDetails => HasDiagnosis || !string.IsNullOrWhiteSpace(NetworkPath);
 
     public bool HasSsh => Definition.Ssh?.Enabled == true && !string.IsNullOrWhiteSpace(SshCommand);
 
@@ -153,18 +169,22 @@ public sealed partial class CriticalDeviceViewModel : ObservableObject
         Diagnosis = diagnosis.Detail;
         Remedy = diagnosis.Remedy;
 
+        NetworkPath = location.NetworkReport?.DescribePath() ?? string.Empty;
+        ReachedThrough = location.NatAddress is null ? string.Empty : $"{location.NatAddress} (the router in front of it)";
+
         // Nothing to expand once a device comes back; leaving it open would show a stale account.
-        if (!diagnosis.HasDiagnosis)
+        if (!HasDetails)
         {
             IsExpanded = false;
         }
 
         // Prefer Tailscale whenever the LAN address is unconfirmed, not only when none was found.
-        // An unverified address is usually one this machine has no route to, so handing out
-        // "ssh user@192.168.0.148" gives a command that cannot work while a working one exists.
+        // An unverified address is usually one this machine has no route to — a device behind
+        // another router is reported with high confidence and still cannot be reached — so handing
+        // out "ssh user@192.168.0.148" gives a command that cannot work while a working one exists.
         var overlayHost = location.TailscaleName ?? location.TailscaleAddress?.ToString();
         var lanIsTrustworthy = !string.IsNullOrWhiteSpace(address)
-            && location.Confidence is LocationConfidence.Confirmed or LocationConfidence.High;
+            && location.Confidence == LocationConfidence.Confirmed;
 
         SshCommand = BuildSshCommand(Definition, lanIsTrustworthy ? address : overlayHost ?? address);
     }
