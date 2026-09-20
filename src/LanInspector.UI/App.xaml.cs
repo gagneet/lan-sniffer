@@ -21,6 +21,7 @@ namespace LanInspector.UI;
 public partial class App : Application
 {
     private ICaptureProvider? _captureProvider;
+    private MainViewModel? _viewModel;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -140,13 +141,25 @@ public partial class App : Application
                 viewModel.ReloadKnownDevices(reloaded.KnownDevices);
             }));
 
+        _viewModel = viewModel;
         var mainWindow = new MainWindow(viewModel);
         mainWindow.Show();
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
-        _captureProvider?.Dispose();
+        // The view model owns the traffic-flow timer and the Flipper's serial port, and its
+        // Dispose was never reached: only the capture provider was released here, so the
+        // COM port stayed open until the process died. Disposing the view model also
+        // disposes the capture provider, so that call is no longer made separately.
+        if (_viewModel is not null)
+        {
+            _viewModel.Dispose();   // disposes the capture provider too
+        }
+        else
+        {
+            _captureProvider?.Dispose();   // startup failed before the view model existed
+        }
         base.OnExit(e);
     }
 }
