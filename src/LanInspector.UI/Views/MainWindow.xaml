@@ -504,6 +504,112 @@
                     </DockPanel>
                 </TabItem>
 
+                <TabItem Header="Flipper">
+                    <DockPanel DataContext="{Binding FlipperTab}" Margin="0,6,0,0">
+                        <Border DockPanel.Dock="Top" Background="White" BorderBrush="#D5DEE7" BorderThickness="1" CornerRadius="6" Padding="10" Margin="0,0,0,8">
+                            <StackPanel>
+                                <DockPanel>
+                                    <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
+                                        <Button Content="Refresh ports" Command="{Binding RefreshPortsCommand}" />
+                                        <ComboBox ItemsSource="{Binding Ports}"
+                                                  SelectedItem="{Binding SelectedPort}"
+                                                  DisplayMemberPath="Description"
+                                                  Width="260"
+                                                  Margin="6,0,0,0"
+                                                  VerticalContentAlignment="Center" />
+                                        <Button Content="Connect" Command="{Binding ConnectCommand}" Margin="6,0,0,0" />
+                                        <Button Content="Disconnect" Command="{Binding DisconnectCommand}" Margin="6,0,0,0" />
+                                        <!-- A Separator only rotates inside a ToolBar; in a
+                                             horizontal StackPanel it draws a horizontal rule. -->
+                                        <Border Width="1" Background="#D5DEE7" Margin="10,2" />
+                                        <TextBlock Text="Dwell (s)" VerticalAlignment="Center" Foreground="#5B6875" />
+                                        <TextBox Text="{Binding DwellSeconds, UpdateSourceTrigger=PropertyChanged}" Width="44" Margin="6,0,0,0" VerticalContentAlignment="Center" />
+                                        <Button Content="Scan sub-GHz" Command="{Binding ScanSubGhzCommand}" Margin="10,0,0,0" />
+                                        <Button Content="Survey BLE band" Command="{Binding SurveyBleCommand}" Margin="6,0,0,0" />
+                                    </StackPanel>
+                                    <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="#5B6875" TextTrimming="CharacterEllipsis" />
+                                </DockPanel>
+                                <TextBlock Text="{Binding DeviceInfoText}"
+                                           Margin="0,8,0,0"
+                                           Foreground="#5B6875"
+                                           FontFamily="Consolas"
+                                           Visibility="{Binding DeviceInfoText, Converter={StaticResource NonEmptyToVisibility}}" />
+                            </StackPanel>
+                        </Border>
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="3*" />
+                                <ColumnDefinition Width="2*" />
+                            </Grid.ColumnDefinitions>
+
+                            <Border Background="White" BorderBrush="#D5DEE7" BorderThickness="1" CornerRadius="6" Margin="0,0,8,0">
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Top" Text="Sub-GHz signals" FontWeight="SemiBold" Margin="10,10,10,2" />
+                                    <TextBlock DockPanel.Dock="Top"
+                                               Text="Gate remotes, garage doors, weather stations and other 315/433/868/915 MHz devices that are on the premises but not on the network."
+                                               TextWrapping="Wrap"
+                                               Foreground="#8A97A4"
+                                               Margin="10,0,10,6" />
+                                    <DataGrid ItemsSource="{Binding SubGhzSignals}"
+                                              AutoGenerateColumns="False"
+                                              IsReadOnly="True"
+                                              CanUserAddRows="False"
+                                              GridLinesVisibility="Horizontal"
+                                              HeadersVisibility="Column"
+                                              RowHeaderWidth="0"
+                                              BorderThickness="0">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="Frequency" Binding="{Binding Frequency}" Width="210" />
+                                            <DataGridTextColumn Header="Protocol" Binding="{Binding Protocol}" Width="230" />
+                                            <DataGridTextColumn Header="RSSI" Binding="{Binding Rssi}" Width="90" />
+                                            <DataGridTextColumn Header="Data" Binding="{Binding Data}" Width="*" />
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                </DockPanel>
+                            </Border>
+
+                            <Border Grid.Column="1" Background="White" BorderBrush="#D5DEE7" BorderThickness="1" CornerRadius="6">
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Top" Text="BLE advertising channels (2.4 GHz)" FontWeight="SemiBold" Margin="10,10,10,2" />
+                                    <TextBlock DockPanel.Dock="Top"
+                                               Text="Received energy per channel, not a device list: stock firmware cannot scan for BLE devices. A loud channel next to a Wi-Fi channel in use is interference worth moving away from."
+                                               TextWrapping="Wrap"
+                                               Foreground="#8A97A4"
+                                               Margin="10,0,10,6" />
+                                    <Border DockPanel.Dock="Bottom"
+                                            Background="#FFF6E5"
+                                            BorderBrush="#E8C67A"
+                                            BorderThickness="1"
+                                            CornerRadius="4"
+                                            Padding="8"
+                                            Margin="10,6,10,10"
+                                            Visibility="{Binding BleNotice, Converter={StaticResource NonEmptyToVisibility}}">
+                                        <TextBlock Text="{Binding BleNotice}" TextWrapping="Wrap" Foreground="#7A5B14" />
+                                    </Border>
+                                    <DataGrid ItemsSource="{Binding BleChannels}"
+                                              AutoGenerateColumns="False"
+                                              IsReadOnly="True"
+                                              CanUserAddRows="False"
+                                              GridLinesVisibility="Horizontal"
+                                              HeadersVisibility="Column"
+                                              RowHeaderWidth="0"
+                                              BorderThickness="0">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="Adv ch" Binding="{Binding AdvertisingChannel}" Width="60" />
+                                            <DataGridTextColumn Header="Frequency" Binding="{Binding Frequency}" Width="90" />
+                                            <DataGridTextColumn Header="Samples" Binding="{Binding Samples}" Width="70" />
+                                            <DataGridTextColumn Header="Median" Binding="{Binding Median}" Width="85" />
+                                            <DataGridTextColumn Header="Peak" Binding="{Binding Peak}" Width="85" />
+                                            <DataGridTextColumn Header="Overlap" Binding="{Binding Overlap}" Width="*" />
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                </DockPanel>
+                            </Border>
+                        </Grid>
+                    </DockPanel>
+                </TabItem>
+
                 <!-- Traffic Tab -->
                 <TabItem Header="Traffic">
                     <DockPanel DataContext="{Binding TrafficTab}" Margin="0,6,0,0">

@@ -83,6 +83,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         TrafficTab = new TrafficTabViewModel(_trafficFlowService, deviceNameResolver);
         TopologyTab = new TopologyTabViewModel(new LocalNetworkProfileProvider(), tailscale, knownDevicesConfig);
         DnsTab = new DnsTabViewModel(dnsFilterService);
+        FlipperTab = new FlipperTabViewModel();
 
         _captureProvider.PacketCaptured += OnPacketCaptured;
         foreach (var analyzer in _analyzers)
@@ -112,6 +113,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public TopologyTabViewModel TopologyTab { get; }
     public TrafficTabViewModel TrafficTab { get; }
     public DnsTabViewModel DnsTab { get; }
+    public FlipperTabViewModel FlipperTab { get; }
     public SettingsTabViewModel? SettingsTab { get; private set; }
 
     /// <summary>
@@ -498,6 +500,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _shutdownCancellation.Dispose();
         _routeDiagnosticsGate.Dispose();
         TrafficTab.Dispose();
+        // The serial close runs on the pool, not the UI thread: the SemaphoreSlim inside
+        // FlipperSerialService would post its continuation back to the dispatcher we are
+        // shutting down. Bounded, because a wedged USB driver must not hold the app open.
+        Task.Run(() => FlipperTab.DisposeAsync().AsTask()).Wait(TimeSpan.FromSeconds(2));
         _disposed = true;
     }
 
