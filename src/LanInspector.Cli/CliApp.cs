@@ -9,6 +9,7 @@ using LanInspector.Core.Dns;
 using LanInspector.Core.Identity;
 using LanInspector.Core.Locator;
 using LanInspector.Core.Flipper;
+using LanInspector.Core.Flipper.Ble;
 using LanInspector.Core.Flipper.Nfc;
 using LanInspector.Core.Flipper.SubGhz;
 using LanInspector.Core.Network;
@@ -1570,6 +1571,10 @@ internal static class CliApp
                 await RunFlipperRfidAsync(flipper, rest, ct);
                 break;
 
+            case "ble":
+                await RunFlipperBleAsync(flipper, rest, ct);
+                break;
+
             case "topology":
                 await RunFlipperTopologyAsync(flipper, rest, knownDevices, tailscale, ct);
                 break;
@@ -1580,7 +1585,7 @@ internal static class CliApp
 
             default:
                 Console.Error.WriteLine($"Unknown flipper subcommand: {sub}");
-                Console.Error.WriteLine("Usage: laninspector flipper detect|ports|info|subghz|nfc|rfid|topology|cmd [options]");
+                Console.Error.WriteLine("Usage: laninspector flipper detect|ports|info|subghz|nfc|rfid|ble|topology|cmd [options]");
                 break;
         }
     }
@@ -1741,6 +1746,75 @@ internal static class CliApp
         Console.WriteLine("RFID tag detected:");
         Console.WriteLine($"  Data:     {result.Data ?? "(unknown)"}");
         Console.WriteLine($"  Protocol: {result.Protocol ?? "(unknown)"}");
+    }
+
+    private static async Task RunFlipperBleAsync(FlipperSerialService flipper, string[] args, CancellationToken ct)
+    {
+        var durationSec = 5;
+        var channels = new List<int>();
+
+        for (var i = 0; i < args.Length - 1; i++)
+        {
+            if (args[i] == "--duration" && int.TryParse(args[i + 1], out var d)) durationSec = d;
+            if (args[i] == "--channel" && int.TryParse(args[i + 1], out var c)) channels.Add(c);
+        }
+
+        var dwell = TimeSpan.FromSeconds(durationSec);
+        var svc   = new FlipperBleService(flipper);
+
+        Console.WriteLine($"BLE 2.4 GHz band survey \u2014 {dwell.TotalSeconds:0}s per channel");
+        Console.WriteLine(new string('-', 62));
+        Console.WriteLine("Stock firmware cannot scan for BLE devices; this measures received");
+        Console.WriteLine("energy on each advertising channel. Needs Debug mode on the Flipper.");
+        Console.WriteLine();
+
+        var result = await svc.SurveyAsync(channels.Count > 0 ? channels : null, dwell, ct);
+
+        if (!string.IsNullOrWhiteSpace(result.HciInfo))
+        {
+            Console.WriteLine("Radio state (bt hci_info):");
+            foreach (var line in result.HciInfo.Split('\n'))
+                if (!string.IsNullOrWhiteSpace(line)) Console.WriteLine($"  {line.TrimEnd()}");
+            Console.WriteLine();
+        }
+
+        if (!result.Succeeded)
+        {
+            Console.Error.WriteLine($"Error: {result.Error}");
+            return;
+        }
+
+        if (result.Channels.Count == 0)
+        {
+            Console.WriteLine("No channels sampled.");
+            return;
+        }
+
+        Console.WriteLine($"Survey complete \u2014 {(int)result.Duration.TotalSeconds}s elapsed");
+        Console.WriteLine();
+        Console.WriteLine("  Adv  Frequency   Samples   Median      Peak   Overlap");
+        Console.WriteLine("  " + new string('-', 68));
+
+        foreach (var ch in result.Channels)
+        {
+            var median = double.IsNaN(ch.MedianDbm) ? "    n/a" : $"{ch.MedianDbm,6:F1} dBm";
+            var peak   = double.IsNaN(ch.PeakDbm)   ? "    n/a" : $"{ch.PeakDbm,6:F1} dBm";
+            var adv = ch.AdvertisingChannel?.ToString() ?? "-";
+            Console.WriteLine($"  {adv,3}  {ch.FrequencyMhz,6:F0} MHz  {ch.Samples.Count,7}  {median}  {peak}   {ch.WifiOverlapLabel}");
+        }
+
+        if (result.DebugModeRequired)
+        {
+            Console.WriteLine();
+            Console.WriteLine("Some channels were refused: turn Debug mode on (Settings \u2192 System \u2192 Debug).");
+        }
+
+        if (result.Channels.All(c => c.Samples.Count == 0))
+        {
+            Console.WriteLine();
+            Console.WriteLine("No readings came back. Try --duration 15, or check that no other");
+            Console.WriteLine("application (qFlipper, Flipper Mobile) holds the serial port.");
+        }
     }
 
     private static async Task RunFlipperRawCmdAsync(FlipperSerialService flipper, string[] args, CancellationToken ct)

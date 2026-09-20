@@ -101,7 +101,7 @@ public sealed class FlipperSubGhzService : IFlipperSubGhzService
             var line = raw.Trim();
 
             // RSSI line — marks the start of a new reception event
-            if (TryParseRssi(line, out var parsedRssi))
+            if (FlipperParse.TryParseRssi(line, out var parsedRssi))
             {
                 Flush();
                 rssi    = parsedRssi;
@@ -146,20 +146,6 @@ public sealed class FlipperSubGhzService : IFlipperSubGhzService
 
         Flush();
         return results;
-    }
-
-    private static bool TryParseRssi(string line, out double rssi)
-    {
-        rssi = 0;
-        var idx = line.IndexOf("RSSI", StringComparison.OrdinalIgnoreCase);
-        if (idx < 0) return false;
-
-        // Find a number (possibly negative) after "RSSI"
-        var after = line[(idx + 4)..].TrimStart(':', ' ', '=');
-        var end   = after.IndexOfAny([' ', '\t', '\r', 'd']); // stop at space or 'dBm'
-        var numStr = end > 0 ? after[..end] : after;
-        return double.TryParse(numStr, System.Globalization.NumberStyles.Float,
-                               System.Globalization.CultureInfo.InvariantCulture, out rssi);
     }
 
     private static string? ExtractField(string line, string fieldName)
