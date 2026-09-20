@@ -193,7 +193,10 @@ public sealed class FlipperSerialService : IFlipperConnectionService
                 try
                 {
                     var ch = (char)_port.ReadChar();
-                    if (ch == '\n')
+                    // Both terminators end a record: subghz/nfc send "\r\n", while progress
+                    // commands such as `bt rx_carrier` rewrite one line with a bare "\r".
+                    // Splitting on '\n' alone buffers those forever and yields nothing.
+                    if (ch is '\n' or '\r')
                     {
                         var line = linesBuf.ToString().Trim('\r', '\n', ' ');
                         // Skip the command echo and blank lines
