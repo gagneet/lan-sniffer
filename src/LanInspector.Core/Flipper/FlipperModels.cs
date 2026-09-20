@@ -98,3 +98,71 @@ public sealed class RfidDetectionResult
     public string? Protocol { get; init; }
     public string? Error { get; init; }
 }
+
+// ── BLE / 2.4 GHz band ───────────────────────────────────────────────────────
+
+/// <summary>
+/// One BLE advertising channel sampled with <c>bt rx_carrier</c>.
+/// The radio reports received energy, so the samples cover everything on that
+/// frequency — BLE advertisements, Wi-Fi, Zigbee, microwave ovens — not just BLE.
+/// </summary>
+public sealed class BleChannelSurvey
+{
+    /// <summary>HCI LE test channel index, 0-39. Frequency is 2402 + 2N MHz.</summary>
+    public required int RfChannel { get; init; }
+
+    /// <summary>
+    /// The BLE advertising channel this index carries (37, 38 or 39), or null for one of
+    /// the 37 data channels, which `--channel` can also ask for. Null rather than 0,
+    /// because 0 is a valid RF index and reading "Adv ch 0" as a channel number is wrong.
+    /// </summary>
+    public int? AdvertisingChannel { get; init; }
+
+    public required IReadOnlyList<double> Samples { get; init; }
+
+    public double FrequencyMhz => 2402 + (2 * RfChannel);
+
+    public double PeakDbm => Samples.Count == 0 ? double.NaN : Samples.Max();
+
+    public double MedianDbm
+    {
+        get
+        {
+            if (Samples.Count == 0) return double.NaN;
+            var sorted = Samples.OrderBy(v => v).ToArray();
+            var mid = sorted.Length / 2;
+            return sorted.Length % 2 == 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+        }
+    }
+
+    /// <summary>
+    /// Which 2.4 GHz Wi-Fi channels sit on this frequency. A busy advertising channel
+    /// next to a Wi-Fi channel in use is the reading that matters on a home network.
+    /// </summary>
+    public string WifiOverlapLabel => AdvertisingChannel switch
+    {
+        37 => "2402 MHz — below Wi-Fi ch 1, usually the quietest",
+        38 => "2426 MHz — inside Wi-Fi ch 3-6",
+        39 => "2480 MHz — inside Wi-Fi ch 13/14",
+        _  => $"{FrequencyMhz:F0} MHz — BLE data channel"
+    };
+}
+
+public sealed class BleSurveyResult
+{
+    public required IReadOnlyList<BleChannelSurvey> Channels { get; init; }
+    public required TimeSpan Duration { get; init; }
+
+    /// <summary>Radio and stack state from <c>bt hci_info</c>, which needs no Debug mode.</summary>
+    public string? HciInfo { get; init; }
+
+    public string? Error { get; init; }
+
+    /// <summary>
+    /// The Flipper answered with its <c>bt</c> usage text, which means the RF test
+    /// commands are compiled in but gated: Settings → System → Debug must be ON.
+    /// </summary>
+    public bool DebugModeRequired { get; init; }
+
+    public bool Succeeded => Error is null;
+}
